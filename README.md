@@ -6,6 +6,10 @@
 
 ---
 
+![Screenshot](./imgs/Screenshot_20260323_170147.png)
+
+---
+
 ## ⬢ Key Features
 
 * **Cyber-Minimalist Aesthetic**: A high-contrast, "hacker-lite" interface featuring:
