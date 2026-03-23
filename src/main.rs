@@ -1,7 +1,7 @@
 mod app;
 mod list;
 
-use std::io;
+use chrono::Local;
 use clap::{arg, command};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
@@ -10,13 +10,13 @@ use crossterm::{
 };
 use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Direction, Layout, Rect, Alignment},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, BorderType},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
     Frame, Terminal,
 };
-use chrono::Local;
+use std::io;
 
 use crate::app::{App, CurrentScreen};
 use crate::list::TodoList;
@@ -91,10 +91,11 @@ fn main() -> io::Result<()> {
 
     if matches.contains_id("list") {
         let items = todo.get_all();
-        let limit = matches.get_one::<String>("list")
+        let limit = matches
+            .get_one::<String>("list")
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(items.len());
-        
+
         for item in items.iter().take(limit) {
             let status = if item.completed { "[X]" } else { "[ ]" };
             let important = if item.important { "!" } else { " " };
@@ -199,8 +200,12 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                             }
                         }
                         KeyCode::Char(c) => app.input.push(c),
-                        KeyCode::Backspace => { app.input.pop(); },
-                        KeyCode::Esc => { app.current_screen = CurrentScreen::Main; },
+                        KeyCode::Backspace => {
+                            app.input.pop();
+                        }
+                        KeyCode::Esc => {
+                            app.current_screen = CurrentScreen::Main;
+                        }
                         _ => {}
                     },
                     CurrentScreen::Editing => match key.code {
@@ -213,12 +218,14 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                             }
                         }
                         KeyCode::Char(c) => app.input.push(c),
-                        KeyCode::Backspace => { app.input.pop(); },
-                        KeyCode::Esc => { 
+                        KeyCode::Backspace => {
+                            app.input.pop();
+                        }
+                        KeyCode::Esc => {
                             app.current_screen = CurrentScreen::Main;
                             app.input.clear();
                             app.editing_id = None;
-                        },
+                        }
                         _ => {}
                     },
                     CurrentScreen::Searching => match key.code {
@@ -262,7 +269,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     let dim_text = Color::Rgb(120, 120, 130);
     let accent_blue = Color::Rgb(0, 153, 255);
     let alert_red = Color::Rgb(255, 82, 82);
-    
+
     let main_block = Block::default().style(Style::default().bg(bg_color).fg(primary_text));
     f.render_widget(main_block, f.area());
 
@@ -279,63 +286,99 @@ fn ui(f: &mut Frame, app: &mut App) {
     // --- HEADER ---
     let header_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(30),
-            Constraint::Min(0),
-        ])
+        .constraints([Constraint::Length(30), Constraint::Min(0)])
         .split(outer_layout[0]);
 
     let ascii_logo = vec![
-        Line::from(vec![Span::styled(" ▟████▙", Style::default().fg(accent_blue))]),
-        Line::from(vec![Span::styled(" ▝▘ ▟█▘ ", Style::default().fg(accent_blue))]),
-        Line::from(vec![Span::styled("   ▟█▘  ", Style::default().fg(accent_blue)), Span::styled(" T O T O", Style::default().fg(primary_text).add_modifier(Modifier::BOLD))]),
-        Line::from(vec![Span::styled("  ▟█▘   ", Style::default().fg(accent_blue)), Span::styled(" [ v2.2 ]", Style::default().fg(dim_text))]),
+        Line::from(vec![Span::styled(
+            " ▟████▙",
+            Style::default().fg(accent_blue),
+        )]),
+        Line::from(vec![Span::styled(
+            " ▝▘ ▟█▘ ",
+            Style::default().fg(accent_blue),
+        )]),
+        Line::from(vec![
+            Span::styled("   ▟█▘  ", Style::default().fg(accent_blue)),
+            Span::styled(
+                " T O T O",
+                Style::default()
+                    .fg(primary_text)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  ▟█▘   ", Style::default().fg(accent_blue)),
+            Span::styled(" [ v2.2 ]", Style::default().fg(dim_text)),
+        ]),
     ];
     f.render_widget(Paragraph::new(ascii_logo), header_chunks[0]);
 
     let search_bar = Paragraph::new(format!("  Search: {}", app.search_query))
         .style(Style::default().fg(primary_text))
-        .block(Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(if app.current_screen == CurrentScreen::Searching { accent_blue } else { dim_text })));
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(
+                    if app.current_screen == CurrentScreen::Searching {
+                        accent_blue
+                    } else {
+                        dim_text
+                    },
+                )),
+        );
     f.render_widget(search_bar, header_chunks[1]);
-    
+
     if app.current_screen == CurrentScreen::Searching {
-        f.set_cursor_position((header_chunks[1].x + app.search_query.len() as u16 + 10, header_chunks[1].y));
+        f.set_cursor_position((
+            header_chunks[1].x + app.search_query.len() as u16 + 10,
+            header_chunks[1].y,
+        ));
     }
 
     // --- MAIN CONTENT ---
     let content_layout = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Min(0),
-            Constraint::Length(25),
-        ])
+        .constraints([Constraint::Min(0), Constraint::Length(25)])
         .split(outer_layout[1]);
 
-    let items: Vec<ListItem> = app.get_filtered_items().iter().map(|item| {
-        let status_icon = if item.completed { "⬢" } else { "⬡" };
-        let important_marker = if item.important { "!" } else { " " };
-        let mut text_style = Style::default().fg(primary_text);
-        let mut icon_style = Style::default().fg(accent_blue);
-        if item.completed {
-            text_style = text_style.fg(dim_text).add_modifier(Modifier::DIM);
-            icon_style = icon_style.fg(dim_text);
-        }
-        let content = Line::from(vec![
-            Span::styled(format!("{:<2} ", item.id), Style::default().fg(dim_text)),
-            Span::styled(format!("{} ", status_icon), icon_style),
-            Span::styled(format!("{} ", important_marker), if item.important { Style::default().fg(alert_red) } else { Style::default().fg(bg_color) }),
-            Span::styled(format!("{}", item.content), text_style),
-        ]);
-        ListItem::new(content)
-    }).collect();
+    let items: Vec<ListItem> = app
+        .get_filtered_items()
+        .iter()
+        .map(|item| {
+            let status_icon = if item.completed { "⬢" } else { "⬡" };
+            let important_marker = if item.important { "!" } else { " " };
+            let mut text_style = Style::default().fg(primary_text);
+            let mut icon_style = Style::default().fg(accent_blue);
+            if item.completed {
+                text_style = text_style.fg(dim_text).add_modifier(Modifier::DIM);
+                icon_style = icon_style.fg(dim_text);
+            }
+            let content = Line::from(vec![
+                Span::styled(format!("{:<2} ", item.id), Style::default().fg(dim_text)),
+                Span::styled(format!("{} ", status_icon), icon_style),
+                Span::styled(
+                    format!("{} ", important_marker),
+                    if item.important {
+                        Style::default().fg(alert_red)
+                    } else {
+                        Style::default().fg(bg_color)
+                    },
+                ),
+                Span::styled(format!("{}", item.content), text_style),
+            ]);
+            ListItem::new(content)
+        })
+        .collect();
 
     let list = List::new(items)
-        .block(Block::default()
-            .borders(Borders::LEFT)
-            .border_style(Style::default().fg(dim_text))
-            .title(" Tasks ").title_style(Style::default().fg(dim_text)))
+        .block(
+            Block::default()
+                .borders(Borders::LEFT)
+                .border_style(Style::default().fg(dim_text))
+                .title(" Tasks ")
+                .title_style(Style::default().fg(dim_text)),
+        )
         .highlight_style(Style::default().bg(card_bg).add_modifier(Modifier::BOLD))
         .highlight_symbol("→ ");
 
@@ -343,25 +386,86 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     // Sidebar Stats (Left Aligned for labels)
     let total = app.todo_list.get_all().len();
-    let completed = app.todo_list.get_all().iter().filter(|t| t.completed).count();
+    let completed = app
+        .todo_list
+        .get_all()
+        .iter()
+        .filter(|t| t.completed)
+        .count();
     let now = Local::now();
-    
+
     let stats_text = vec![
         Line::from(""),
-        Line::from(vec![Span::styled(" PROGRESS", Style::default().fg(dim_text))]),
-        Line::from(vec![Span::styled(" Total      ", Style::default().fg(dim_text)), Span::styled(total.to_string(), Style::default().fg(primary_text))]),
-        Line::from(vec![Span::styled(" Done       ", Style::default().fg(dim_text)), Span::styled(completed.to_string(), Style::default().fg(primary_text))]),
+        Line::from(vec![Span::styled(
+            " PROGRESS",
+            Style::default().fg(dim_text),
+        )]),
+        Line::from(vec![
+            Span::styled(" Total      ", Style::default().fg(dim_text)),
+            Span::styled(total.to_string(), Style::default().fg(primary_text)),
+        ]),
+        Line::from(vec![
+            Span::styled(" Done       ", Style::default().fg(dim_text)),
+            Span::styled(completed.to_string(), Style::default().fg(primary_text)),
+        ]),
         Line::from(""),
         Line::from(vec![Span::styled(" STATUS", Style::default().fg(dim_text))]),
-        Line::from(vec![Span::styled(" Date       ", Style::default().fg(dim_text)), Span::styled(now.format("%Y-%m-%d").to_string(), Style::default().fg(primary_text))]),
-        Line::from(vec![Span::styled(" Time       ", Style::default().fg(dim_text)), Span::styled(now.format("%H:%M:%S").to_string(), Style::default().fg(accent_blue))]),
-        Line::from(vec![Span::styled(" OS         ", Style::default().fg(dim_text)), Span::styled(std::env::consts::OS.to_uppercase(), Style::default().fg(primary_text))]),
-        Line::from(vec![Span::styled(" DB         ", Style::default().fg(dim_text)), Span::styled("SQLITE", Style::default().fg(primary_text)), Span::styled(if (app.ticks / 10) % 2 == 0 { " ●" } else { " ○" }, Style::default().fg(accent_blue))]),
+        Line::from(vec![
+            Span::styled(" Date       ", Style::default().fg(dim_text)),
+            Span::styled(
+                now.format("%Y-%m-%d").to_string(),
+                Style::default().fg(primary_text),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(" Time       ", Style::default().fg(dim_text)),
+            Span::styled(
+                now.format("%H:%M:%S").to_string(),
+                Style::default().fg(accent_blue),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(" OS         ", Style::default().fg(dim_text)),
+            Span::styled(
+                std::env::consts::OS.to_uppercase(),
+                Style::default().fg(primary_text),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(" DB         ", Style::default().fg(dim_text)),
+            Span::styled("SQLITE", Style::default().fg(primary_text)),
+            Span::styled(
+                if (app.ticks / 10) % 2 == 0 {
+                    " ●"
+                } else {
+                    " ○"
+                },
+                Style::default().fg(accent_blue),
+            ),
+        ]),
         Line::from(""),
-        Line::from(vec![Span::styled(" METRICS", Style::default().fg(dim_text))]),
-        Line::from(vec![Span::styled(" Latency    ", Style::default().fg(dim_text)), Span::styled(format!("{}ms", (app.ticks % 15) + 10), Style::default().fg(accent_blue))]),
-        Line::from(vec![Span::styled(" Entropy    ", Style::default().fg(dim_text)), Span::styled(format!("0x{:04X}", app.ticks % 0xFFFF), Style::default().fg(primary_text))]),
-        Line::from(vec![Span::styled(" Kernel     ", Style::default().fg(dim_text)), Span::styled("L-042", Style::default().fg(primary_text))]),
+        Line::from(vec![Span::styled(
+            " METRICS",
+            Style::default().fg(dim_text),
+        )]),
+        Line::from(vec![
+            Span::styled(" Latency    ", Style::default().fg(dim_text)),
+            Span::styled(
+                format!("{}ms", (app.ticks % 15) + 10),
+                Style::default().fg(accent_blue),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(" Entropy    ", Style::default().fg(dim_text)),
+            Span::styled(
+                format!("0x{:04X}", app.ticks % 0xFFFF),
+                Style::default().fg(primary_text),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(" Kernel     ", Style::default().fg(dim_text)),
+            Span::styled("L-042", Style::default().fg(primary_text)),
+        ]),
     ];
     let stats = Paragraph::new(stats_text);
     f.render_widget(stats, content_layout[1]);
@@ -383,12 +487,17 @@ fn ui(f: &mut Frame, app: &mut App) {
     if app.current_screen == CurrentScreen::Adding || app.current_screen == CurrentScreen::Editing {
         let area = centered_rect(50, 15, f.area());
         f.render_widget(Clear, area);
-        let title = if app.current_screen == CurrentScreen::Adding { " Add Task " } else { " Edit Task " };
+        let title = if app.current_screen == CurrentScreen::Adding {
+            " Add Task "
+        } else {
+            " Edit Task "
+        };
         let input_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(accent_blue))
             .bg(card_bg)
-            .title(title).title_style(Style::default().fg(accent_blue));
+            .title(title)
+            .title_style(Style::default().fg(accent_blue));
         let input = Paragraph::new(format!("\n  > {}", app.input))
             .style(Style::default().fg(primary_text))
             .block(input_block);
@@ -399,11 +508,13 @@ fn ui(f: &mut Frame, app: &mut App) {
         f.render_widget(Clear, area);
         let confirm = Paragraph::new("\nConfirm deletion?\n\n(y) Yes / (n) No")
             .style(Style::default().fg(alert_red))
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(alert_red))
-                .bg(card_bg)
-                .title(" Warning "))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(alert_red))
+                    .bg(card_bg)
+                    .title(" Warning "),
+            )
             .alignment(Alignment::Center);
         f.render_widget(confirm, area);
     }

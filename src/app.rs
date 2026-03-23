@@ -1,5 +1,5 @@
+use crate::list::{Line, TodoList};
 use ratatui::widgets::ListState;
-use crate::list::{TodoList, Line};
 
 #[derive(PartialEq)]
 pub enum CurrentScreen {
@@ -49,7 +49,8 @@ impl App {
             items
         } else {
             let query = self.search_query.to_lowercase();
-            items.into_iter()
+            items
+                .into_iter()
                 .filter(|item| item.content.to_lowercase().contains(&query))
                 .collect()
         }
@@ -57,7 +58,9 @@ impl App {
 
     pub fn next(&mut self) {
         let items = self.get_filtered_items();
-        if items.is_empty() { return; }
+        if items.is_empty() {
+            return;
+        }
         let i = match self.list_state.selected() {
             Some(i) => {
                 if i >= items.len() - 1 {
@@ -73,7 +76,9 @@ impl App {
 
     pub fn previous(&mut self) {
         let items = self.get_filtered_items();
-        if items.is_empty() { return; }
+        if items.is_empty() {
+            return;
+        }
         let i = match self.list_state.selected() {
             Some(i) => {
                 if i == 0 {
@@ -93,7 +98,7 @@ impl App {
             if i < items.len() {
                 let id = items[i].id;
                 self.todo_list.remove(id);
-                
+
                 let new_items = self.get_filtered_items();
                 if new_items.is_empty() {
                     self.list_state.select(None);
