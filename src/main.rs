@@ -11,11 +11,12 @@ use crossterm::{
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout, Rect, Alignment},
-    style::{Color, Modifier, Style},
+    style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, BorderType},
     Frame, Terminal,
 };
+use chrono::Local;
 
 use crate::app::{App, CurrentScreen};
 use crate::list::TodoList;
@@ -255,24 +256,23 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
 }
 
 fn ui(f: &mut Frame, app: &mut App) {
-    // Cyber-Minimalist Palette
-    let bg_color = Color::Rgb(28, 27, 33); // Dark Charcoal Blue
-    let primary_text = Color::Rgb(224, 224, 224); // Cool Silver
-    let dim_text = Color::Rgb(100, 100, 110); // Low opacity labels
-    let accent_blue = Color::Rgb(0, 153, 255); // Electric Blue
+    let bg_color = Color::Rgb(20, 20, 25);
+    let card_bg = Color::Rgb(30, 30, 35);
+    let primary_text = Color::Rgb(224, 224, 224);
+    let dim_text = Color::Rgb(120, 120, 130);
+    let accent_blue = Color::Rgb(0, 153, 255);
     let alert_red = Color::Rgb(255, 82, 82);
     
-    // Clear background
     let main_block = Block::default().style(Style::default().bg(bg_color).fg(primary_text));
     f.render_widget(main_block, f.area());
 
     let outer_layout = Layout::default()
         .direction(Direction::Vertical)
-        .margin(2) // Generous margin for "breathing room"
+        .margin(2)
         .constraints([
-            Constraint::Length(3), // Header
-            Constraint::Min(0),    // Content
-            Constraint::Length(1), // Footer/Help
+            Constraint::Length(5),
+            Constraint::Min(0),
+            Constraint::Length(1),
         ])
         .split(f.area());
 
@@ -280,57 +280,48 @@ fn ui(f: &mut Frame, app: &mut App) {
     let header_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(25), // Brand/Title
-            Constraint::Min(0),    // Search
-            Constraint::Length(20), // Status
+            Constraint::Length(30),
+            Constraint::Min(0),
         ])
         .split(outer_layout[0]);
 
-    let brand = Paragraph::new("TOTO // SYSTEM.V2")
-        .style(Style::default().fg(accent_blue).add_modifier(Modifier::BOLD));
-    f.render_widget(brand, header_chunks[0]);
+    let ascii_logo = vec![
+        Line::from(vec![Span::styled(" ▟████▙", Style::default().fg(accent_blue))]),
+        Line::from(vec![Span::styled(" ▝▘ ▟█▘ ", Style::default().fg(accent_blue))]),
+        Line::from(vec![Span::styled("   ▟█▘  ", Style::default().fg(accent_blue)), Span::styled(" T O T O", Style::default().fg(primary_text).add_modifier(Modifier::BOLD))]),
+        Line::from(vec![Span::styled("  ▟█▘   ", Style::default().fg(accent_blue)), Span::styled(" [ v2.2 ]", Style::default().fg(dim_text))]),
+    ];
+    f.render_widget(Paragraph::new(ascii_logo), header_chunks[0]);
 
-    let search_title = if app.current_screen == CurrentScreen::Searching { "SEARCH_ACTIVE" } else { "SEARCH_IDLE" };
-    let search_bar = Paragraph::new(format!("> {}", app.search_query))
+    let search_bar = Paragraph::new(format!("  Search: {}", app.search_query))
         .style(Style::default().fg(primary_text))
         .block(Block::default()
             .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(if app.current_screen == CurrentScreen::Searching { accent_blue } else { dim_text }))
-            .title(format!(" {} ", search_title)).title_style(Style::default().fg(dim_text)));
+            .border_style(Style::default().fg(if app.current_screen == CurrentScreen::Searching { accent_blue } else { dim_text })));
     f.render_widget(search_bar, header_chunks[1]);
     
     if app.current_screen == CurrentScreen::Searching {
-        f.set_cursor_position((header_chunks[1].x + app.search_query.len() as u16 + 3, header_chunks[1].y + 1));
+        f.set_cursor_position((header_chunks[1].x + app.search_query.len() as u16 + 10, header_chunks[1].y));
     }
-
-    let sys_time = (app.ticks / 20) % 2 == 0;
-    let status = Paragraph::new(if sys_time { "● SYNCED" } else { "○ SYNCED" })
-        .style(Style::default().fg(dim_text))
-        .alignment(Alignment::Right);
-    f.render_widget(status, header_chunks[2]);
 
     // --- MAIN CONTENT ---
     let content_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Min(0),    // List
-            Constraint::Length(25), // Stats Sidebar
+            Constraint::Min(0),
+            Constraint::Length(25),
         ])
         .split(outer_layout[1]);
 
-    // List items
     let items: Vec<ListItem> = app.get_filtered_items().iter().map(|item| {
         let status_icon = if item.completed { "⬢" } else { "⬡" };
         let important_marker = if item.important { "!" } else { " " };
-        
         let mut text_style = Style::default().fg(primary_text);
         let mut icon_style = Style::default().fg(accent_blue);
-        
         if item.completed {
             text_style = text_style.fg(dim_text).add_modifier(Modifier::DIM);
             icon_style = icon_style.fg(dim_text);
         }
-        
         let content = Line::from(vec![
             Span::styled(format!("{:<2} ", item.id), Style::default().fg(dim_text)),
             Span::styled(format!("{} ", status_icon), icon_style),
@@ -342,37 +333,46 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     let list = List::new(items)
         .block(Block::default()
-            .borders(Borders::LEFT) // Brutalist single-line divider
+            .borders(Borders::LEFT)
             .border_style(Style::default().fg(dim_text))
-            .title(" MANIFEST ").title_style(Style::default().fg(dim_text)))
-        .highlight_style(Style::default().bg(Color::Rgb(40, 40, 50)).add_modifier(Modifier::BOLD))
+            .title(" Tasks ").title_style(Style::default().fg(dim_text)))
+        .highlight_style(Style::default().bg(card_bg).add_modifier(Modifier::BOLD))
         .highlight_symbol("→ ");
 
     f.render_stateful_widget(list, content_layout[0], &mut app.list_state);
 
-    // Sidebar Stats
+    // Sidebar Stats (Left Aligned for labels)
     let total = app.todo_list.get_all().len();
     let completed = app.todo_list.get_all().iter().filter(|t| t.completed).count();
+    let now = Local::now();
     
     let stats_text = vec![
         Line::from(""),
-        Line::from(vec![Span::styled("INDEX_INFO", Style::default().fg(dim_text))]),
-        Line::from(vec![Span::styled("TOTAL ", Style::default().fg(dim_text)), Span::styled(total.to_string(), Style::default().fg(primary_text))]),
-        Line::from(vec![Span::styled("COMPL ", Style::default().fg(dim_text)), Span::styled(completed.to_string(), Style::default().fg(primary_text))]),
+        Line::from(vec![Span::styled(" PROGRESS", Style::default().fg(dim_text))]),
+        Line::from(vec![Span::styled(" Total      ", Style::default().fg(dim_text)), Span::styled(total.to_string(), Style::default().fg(primary_text))]),
+        Line::from(vec![Span::styled(" Done       ", Style::default().fg(dim_text)), Span::styled(completed.to_string(), Style::default().fg(primary_text))]),
         Line::from(""),
-        Line::from(vec![Span::styled("TERMINAL_LOAD", Style::default().fg(dim_text))]),
-        Line::from(vec![Span::styled("SYS_0x", Style::default().fg(dim_text)), Span::styled(format!("{:02X}", app.ticks % 255), Style::default().fg(accent_blue))]),
+        Line::from(vec![Span::styled(" STATUS", Style::default().fg(dim_text))]),
+        Line::from(vec![Span::styled(" Date       ", Style::default().fg(dim_text)), Span::styled(now.format("%Y-%m-%d").to_string(), Style::default().fg(primary_text))]),
+        Line::from(vec![Span::styled(" Time       ", Style::default().fg(dim_text)), Span::styled(now.format("%H:%M:%S").to_string(), Style::default().fg(accent_blue))]),
+        Line::from(vec![Span::styled(" OS         ", Style::default().fg(dim_text)), Span::styled(std::env::consts::OS.to_uppercase(), Style::default().fg(primary_text))]),
+        Line::from(vec![Span::styled(" DB         ", Style::default().fg(dim_text)), Span::styled("SQLITE", Style::default().fg(primary_text)), Span::styled(if (app.ticks / 10) % 2 == 0 { " ●" } else { " ○" }, Style::default().fg(accent_blue))]),
+        Line::from(""),
+        Line::from(vec![Span::styled(" METRICS", Style::default().fg(dim_text))]),
+        Line::from(vec![Span::styled(" Latency    ", Style::default().fg(dim_text)), Span::styled(format!("{}ms", (app.ticks % 15) + 10), Style::default().fg(accent_blue))]),
+        Line::from(vec![Span::styled(" Entropy    ", Style::default().fg(dim_text)), Span::styled(format!("0x{:04X}", app.ticks % 0xFFFF), Style::default().fg(primary_text))]),
+        Line::from(vec![Span::styled(" Kernel     ", Style::default().fg(dim_text)), Span::styled("L-042", Style::default().fg(primary_text))]),
     ];
     let stats = Paragraph::new(stats_text);
     f.render_widget(stats, content_layout[1]);
 
     // --- FOOTER ---
     let help_message = match app.current_screen {
-        CurrentScreen::Main => "A:ADD // E:EDIT // C:EXEC // I:PRIOR // D:RM // /:FIND // Q:EXIT",
-        CurrentScreen::Adding => "ENTER:COMMIT // ESC:ABORT",
-        CurrentScreen::Editing => "ENTER:UPDATE // ESC:ABORT",
-        CurrentScreen::Searching => "ENTER:CONFIRM // ESC:RESET",
-        CurrentScreen::ConfirmingDelete => "WIPE SELECTED DATA? (Y/N)",
+        CurrentScreen::Main => "a:add  e:edit  c:done  i:important  d:delete  /:search  q:quit",
+        CurrentScreen::Adding => "enter:save  esc:cancel",
+        CurrentScreen::Editing => "enter:update  esc:cancel",
+        CurrentScreen::Searching => "enter:done  esc:reset",
+        CurrentScreen::ConfirmingDelete => "Confirm delete? (y/n)",
     };
     let footer = Paragraph::new(help_message)
         .style(Style::default().fg(dim_text))
@@ -383,25 +383,27 @@ fn ui(f: &mut Frame, app: &mut App) {
     if app.current_screen == CurrentScreen::Adding || app.current_screen == CurrentScreen::Editing {
         let area = centered_rect(50, 15, f.area());
         f.render_widget(Clear, area);
-        let title = if app.current_screen == CurrentScreen::Adding { " NEW_ENTRY " } else { " EDIT_ENTRY " };
-        let input = Paragraph::new(format!("> {}", app.input))
+        let title = if app.current_screen == CurrentScreen::Adding { " Add Task " } else { " Edit Task " };
+        let input_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(accent_blue))
+            .bg(card_bg)
+            .title(title).title_style(Style::default().fg(accent_blue));
+        let input = Paragraph::new(format!("\n  > {}", app.input))
             .style(Style::default().fg(primary_text))
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Plain)
-                .border_style(Style::default().fg(accent_blue))
-                .title(title).title_style(Style::default().fg(accent_blue)));
+            .block(input_block);
         f.render_widget(input, area);
-        f.set_cursor_position((area.x + app.input.len() as u16 + 3, area.y + 1));
+        f.set_cursor_position((area.x + app.input.len() as u16 + 5, area.y + 2));
     } else if app.current_screen == CurrentScreen::ConfirmingDelete {
         let area = centered_rect(40, 20, f.area());
         f.render_widget(Clear, area);
-        let confirm = Paragraph::new("\nCONFIRM DELETION PROTOCOL\n\n(Y) YES / (N) NO")
+        let confirm = Paragraph::new("\nConfirm deletion?\n\n(y) Yes / (n) No")
             .style(Style::default().fg(alert_red))
             .block(Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(alert_red))
-                .title(" SECURITY_OVERRIDE "))
+                .bg(card_bg)
+                .title(" Warning "))
             .alignment(Alignment::Center);
         f.render_widget(confirm, area);
     }
