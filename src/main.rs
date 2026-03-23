@@ -10,10 +10,10 @@ use crossterm::{
 };
 use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect, Alignment},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, BorderType},
     Frame, Terminal,
 };
 
@@ -96,7 +96,7 @@ fn main() -> io::Result<()> {
         
         for item in items.iter().take(limit) {
             let status = if item.completed { "[X]" } else { "[ ]" };
-            let important = if item.important { "⭐" } else { "  " };
+            let important = if item.important { "!" } else { " " };
             println!("{} {} {}: {}", important, status, item.id, item.content);
         }
         performed_action = true;
@@ -135,184 +135,274 @@ fn run_tui() -> io::Result<()> {
 }
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
+    let tick_rate = std::time::Duration::from_millis(50);
+    let mut last_tick = std::time::Instant::now();
+
     loop {
         terminal.draw(|f| ui(f, app))?;
 
-        if let Event::Key(key) = event::read()? {
-            match app.current_screen {
-                CurrentScreen::Main => match key.code {
-                    KeyCode::Char('q') => return Ok(()),
-                    KeyCode::Char('a') => {
-                        app.current_screen = CurrentScreen::Adding;
-                        app.input.clear();
-                    }
-                    KeyCode::Char('e') => {
-                        let items = app.get_filtered_items();
-                        if let Some(i) = app.list_state.selected() {
-                            if i < items.len() {
-                                app.current_screen = CurrentScreen::Editing;
-                                app.editing_id = Some(items[i].id);
-                                app.input = items[i].content.clone();
-                            }
-                        }
-                    }
-                    KeyCode::Char('d') | KeyCode::Char('x') => {
-                        if app.list_state.selected().is_some() {
-                            app.current_screen = CurrentScreen::ConfirmingDelete;
-                        }
-                    }
-                    KeyCode::Char('/') => {
-                        app.current_screen = CurrentScreen::Searching;
-                    }
-                    KeyCode::Char('c') | KeyCode::Enter => {
-                        app.toggle_completed();
-                    }
-                    KeyCode::Char('i') => {
-                        app.toggle_important();
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        app.next();
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        app.previous();
-                    }
-                    KeyCode::Esc => {
-                        app.search_query.clear();
-                    }
-                    _ => {}
-                },
-                CurrentScreen::Adding => match key.code {
-                    KeyCode::Enter => {
-                        if !app.input.is_empty() {
-                            app.todo_list.add_line(app.input.clone());
-                            app.current_screen = CurrentScreen::Main;
+        let timeout = tick_rate
+            .checked_sub(last_tick.elapsed())
+            .unwrap_or_else(|| std::time::Duration::from_secs(0));
+
+        if event::poll(timeout)? {
+            if let Event::Key(key) = event::read()? {
+                match app.current_screen {
+                    CurrentScreen::Main => match key.code {
+                        KeyCode::Char('q') => return Ok(()),
+                        KeyCode::Char('a') => {
+                            app.current_screen = CurrentScreen::Adding;
                             app.input.clear();
                         }
-                    }
-                    KeyCode::Char(c) => app.input.push(c),
-                    KeyCode::Backspace => { app.input.pop(); },
-                    KeyCode::Esc => { app.current_screen = CurrentScreen::Main; },
-                    _ => {}
-                },
-                CurrentScreen::Editing => match key.code {
-                    KeyCode::Enter => {
-                        if let Some(id) = app.editing_id {
-                            app.todo_list.update_content(id, app.input.clone());
+                        KeyCode::Char('e') => {
+                            let items = app.get_filtered_items();
+                            if let Some(i) = app.list_state.selected() {
+                                if i < items.len() {
+                                    app.current_screen = CurrentScreen::Editing;
+                                    app.editing_id = Some(items[i].id);
+                                    app.input = items[i].content.clone();
+                                }
+                            }
+                        }
+                        KeyCode::Char('d') | KeyCode::Char('x') => {
+                            if app.list_state.selected().is_some() {
+                                app.current_screen = CurrentScreen::ConfirmingDelete;
+                            }
+                        }
+                        KeyCode::Char('/') => {
+                            app.current_screen = CurrentScreen::Searching;
+                        }
+                        KeyCode::Char('c') | KeyCode::Enter => {
+                            app.toggle_completed();
+                        }
+                        KeyCode::Char('i') => {
+                            app.toggle_important();
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            app.next();
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            app.previous();
+                        }
+                        KeyCode::Esc => {
+                            app.search_query.clear();
+                        }
+                        _ => {}
+                    },
+                    CurrentScreen::Adding => match key.code {
+                        KeyCode::Enter => {
+                            if !app.input.is_empty() {
+                                app.todo_list.add_line(app.input.clone());
+                                app.current_screen = CurrentScreen::Main;
+                                app.input.clear();
+                            }
+                        }
+                        KeyCode::Char(c) => app.input.push(c),
+                        KeyCode::Backspace => { app.input.pop(); },
+                        KeyCode::Esc => { app.current_screen = CurrentScreen::Main; },
+                        _ => {}
+                    },
+                    CurrentScreen::Editing => match key.code {
+                        KeyCode::Enter => {
+                            if let Some(id) = app.editing_id {
+                                app.todo_list.update_content(id, app.input.clone());
+                                app.current_screen = CurrentScreen::Main;
+                                app.input.clear();
+                                app.editing_id = None;
+                            }
+                        }
+                        KeyCode::Char(c) => app.input.push(c),
+                        KeyCode::Backspace => { app.input.pop(); },
+                        KeyCode::Esc => { 
                             app.current_screen = CurrentScreen::Main;
                             app.input.clear();
                             app.editing_id = None;
-                        }
-                    }
-                    KeyCode::Char(c) => app.input.push(c),
-                    KeyCode::Backspace => { app.input.pop(); },
-                    KeyCode::Esc => { 
-                        app.current_screen = CurrentScreen::Main;
-                        app.input.clear();
-                        app.editing_id = None;
+                        },
+                        _ => {}
                     },
-                    _ => {}
-                },
-                CurrentScreen::Searching => match key.code {
-                    KeyCode::Enter | KeyCode::Esc => {
-                        app.current_screen = CurrentScreen::Main;
-                    }
-                    KeyCode::Char(c) => {
-                        app.search_query.push(c);
-                        app.list_state.select(Some(0));
-                    }
-                    KeyCode::Backspace => {
-                        app.search_query.pop();
-                        app.list_state.select(Some(0));
-                    }
-                    _ => {}
-                },
-                CurrentScreen::ConfirmingDelete => match key.code {
-                    KeyCode::Char('y') | KeyCode::Enter => {
-                        app.remove_selected();
-                        app.current_screen = CurrentScreen::Main;
-                    }
-                    _ => {
-                        app.current_screen = CurrentScreen::Main;
-                    }
-                },
+                    CurrentScreen::Searching => match key.code {
+                        KeyCode::Enter | KeyCode::Esc => {
+                            app.current_screen = CurrentScreen::Main;
+                        }
+                        KeyCode::Char(c) => {
+                            app.search_query.push(c);
+                            app.list_state.select(Some(0));
+                        }
+                        KeyCode::Backspace => {
+                            app.search_query.pop();
+                            app.list_state.select(Some(0));
+                        }
+                        _ => {}
+                    },
+                    CurrentScreen::ConfirmingDelete => match key.code {
+                        KeyCode::Char('y') | KeyCode::Enter => {
+                            app.remove_selected();
+                            app.current_screen = CurrentScreen::Main;
+                        }
+                        _ => {
+                            app.current_screen = CurrentScreen::Main;
+                        }
+                    },
+                }
             }
+        }
+
+        if last_tick.elapsed() >= tick_rate {
+            app.on_tick();
+            last_tick = std::time::Instant::now();
         }
     }
 }
 
 fn ui(f: &mut Frame, app: &mut App) {
-    let chunks = Layout::default()
+    // Cyber-Minimalist Palette
+    let bg_color = Color::Rgb(28, 27, 33); // Dark Charcoal Blue
+    let primary_text = Color::Rgb(224, 224, 224); // Cool Silver
+    let dim_text = Color::Rgb(100, 100, 110); // Low opacity labels
+    let accent_blue = Color::Rgb(0, 153, 255); // Electric Blue
+    let alert_red = Color::Rgb(255, 82, 82);
+    
+    // Clear background
+    let main_block = Block::default().style(Style::default().bg(bg_color).fg(primary_text));
+    f.render_widget(main_block, f.area());
+
+    let outer_layout = Layout::default()
         .direction(Direction::Vertical)
+        .margin(2) // Generous margin for "breathing room"
         .constraints([
-            Constraint::Length(3), // Search bar
-            Constraint::Min(0),    // List
-            Constraint::Length(3), // Help
+            Constraint::Length(3), // Header
+            Constraint::Min(0),    // Content
+            Constraint::Length(1), // Footer/Help
         ])
         .split(f.area());
 
-    // Search bar
-    let search_title = if app.current_screen == CurrentScreen::Searching { " Searching (Type to filter) " } else { " Search (Press / to filter) " };
-    let search_bar = Paragraph::new(app.search_query.as_str())
-        .block(Block::default().borders(Borders::ALL).title(search_title));
-    f.render_widget(search_bar, chunks[0]);
+    // --- HEADER ---
+    let header_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(25), // Brand/Title
+            Constraint::Min(0),    // Search
+            Constraint::Length(20), // Status
+        ])
+        .split(outer_layout[0]);
+
+    let brand = Paragraph::new("TOTO // SYSTEM.V2")
+        .style(Style::default().fg(accent_blue).add_modifier(Modifier::BOLD));
+    f.render_widget(brand, header_chunks[0]);
+
+    let search_title = if app.current_screen == CurrentScreen::Searching { "SEARCH_ACTIVE" } else { "SEARCH_IDLE" };
+    let search_bar = Paragraph::new(format!("> {}", app.search_query))
+        .style(Style::default().fg(primary_text))
+        .block(Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(if app.current_screen == CurrentScreen::Searching { accent_blue } else { dim_text }))
+            .title(format!(" {} ", search_title)).title_style(Style::default().fg(dim_text)));
+    f.render_widget(search_bar, header_chunks[1]);
+    
     if app.current_screen == CurrentScreen::Searching {
-        f.set_cursor_position((chunks[0].x + app.search_query.len() as u16 + 1, chunks[0].y + 1));
+        f.set_cursor_position((header_chunks[1].x + app.search_query.len() as u16 + 3, header_chunks[1].y + 1));
     }
 
-    // List
-    let items: Vec<ListItem> = app.get_filtered_items().iter().map(|item| {
-        let status = if item.completed { " [X] " } else { " [ ] " };
-        let important = if item.important { " ⭐ " } else { "    " };
-        
-        let mut style = Style::default();
-        if item.completed {
-            style = style.fg(Color::DarkGray).add_modifier(Modifier::CROSSED_OUT);
-        }
-        if item.important {
-            style = style.fg(Color::Yellow);
-        }
+    let sys_time = (app.ticks / 20) % 2 == 0;
+    let status = Paragraph::new(if sys_time { "● SYNCED" } else { "○ SYNCED" })
+        .style(Style::default().fg(dim_text))
+        .alignment(Alignment::Right);
+    f.render_widget(status, header_chunks[2]);
 
+    // --- MAIN CONTENT ---
+    let content_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(0),    // List
+            Constraint::Length(25), // Stats Sidebar
+        ])
+        .split(outer_layout[1]);
+
+    // List items
+    let items: Vec<ListItem> = app.get_filtered_items().iter().map(|item| {
+        let status_icon = if item.completed { "⬢" } else { "⬡" };
+        let important_marker = if item.important { "!" } else { " " };
+        
+        let mut text_style = Style::default().fg(primary_text);
+        let mut icon_style = Style::default().fg(accent_blue);
+        
+        if item.completed {
+            text_style = text_style.fg(dim_text).add_modifier(Modifier::DIM);
+            icon_style = icon_style.fg(dim_text);
+        }
+        
         let content = Line::from(vec![
-            Span::styled(important, Style::default().fg(Color::Yellow)),
-            Span::styled(status, if item.completed { Style::default().fg(Color::Green) } else { Style::default() }),
-            Span::styled(item.content.clone(), style),
+            Span::styled(format!("{:<2} ", item.id), Style::default().fg(dim_text)),
+            Span::styled(format!("{} ", status_icon), icon_style),
+            Span::styled(format!("{} ", important_marker), if item.important { Style::default().fg(alert_red) } else { Style::default().fg(bg_color) }),
+            Span::styled(format!("{}", item.content), text_style),
         ]);
         ListItem::new(content)
     }).collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(" Todo List "))
-        .highlight_style(Style::default().bg(Color::Blue))
-        .highlight_symbol(">> ");
+        .block(Block::default()
+            .borders(Borders::LEFT) // Brutalist single-line divider
+            .border_style(Style::default().fg(dim_text))
+            .title(" MANIFEST ").title_style(Style::default().fg(dim_text)))
+        .highlight_style(Style::default().bg(Color::Rgb(40, 40, 50)).add_modifier(Modifier::BOLD))
+        .highlight_symbol("→ ");
 
-    f.render_stateful_widget(list, chunks[1], &mut app.list_state);
+    f.render_stateful_widget(list, content_layout[0], &mut app.list_state);
 
-    // Help
+    // Sidebar Stats
+    let total = app.todo_list.get_all().len();
+    let completed = app.todo_list.get_all().iter().filter(|t| t.completed).count();
+    
+    let stats_text = vec![
+        Line::from(""),
+        Line::from(vec![Span::styled("INDEX_INFO", Style::default().fg(dim_text))]),
+        Line::from(vec![Span::styled("TOTAL ", Style::default().fg(dim_text)), Span::styled(total.to_string(), Style::default().fg(primary_text))]),
+        Line::from(vec![Span::styled("COMPL ", Style::default().fg(dim_text)), Span::styled(completed.to_string(), Style::default().fg(primary_text))]),
+        Line::from(""),
+        Line::from(vec![Span::styled("TERMINAL_LOAD", Style::default().fg(dim_text))]),
+        Line::from(vec![Span::styled("SYS_0x", Style::default().fg(dim_text)), Span::styled(format!("{:02X}", app.ticks % 255), Style::default().fg(accent_blue))]),
+    ];
+    let stats = Paragraph::new(stats_text);
+    f.render_widget(stats, content_layout[1]);
+
+    // --- FOOTER ---
     let help_message = match app.current_screen {
-        CurrentScreen::Main => "q:quit | a:add | e:edit | d:del | c:done | i:imp | /:search",
-        CurrentScreen::Adding => "Enter:save | Esc:cancel",
-        CurrentScreen::Editing => "Enter:save | Esc:cancel",
-        CurrentScreen::Searching => "Enter:finish | Backspace:del",
-        CurrentScreen::ConfirmingDelete => "Confirm delete? (y/n)",
+        CurrentScreen::Main => "A:ADD // E:EDIT // C:EXEC // I:PRIOR // D:RM // /:FIND // Q:EXIT",
+        CurrentScreen::Adding => "ENTER:COMMIT // ESC:ABORT",
+        CurrentScreen::Editing => "ENTER:UPDATE // ESC:ABORT",
+        CurrentScreen::Searching => "ENTER:CONFIRM // ESC:RESET",
+        CurrentScreen::ConfirmingDelete => "WIPE SELECTED DATA? (Y/N)",
     };
-    let help = Paragraph::new(help_message).block(Block::default().borders(Borders::ALL).title(" Help "));
-    f.render_widget(help, chunks[2]);
+    let footer = Paragraph::new(help_message)
+        .style(Style::default().fg(dim_text))
+        .alignment(Alignment::Center);
+    f.render_widget(footer, outer_layout[2]);
 
     // Popups
     if app.current_screen == CurrentScreen::Adding || app.current_screen == CurrentScreen::Editing {
-        let area = centered_rect(60, 20, f.area());
+        let area = centered_rect(50, 15, f.area());
         f.render_widget(Clear, area);
-        let title = if app.current_screen == CurrentScreen::Adding { " Add New Task " } else { " Edit Task " };
-        let input = Paragraph::new(app.input.as_str())
-            .block(Block::default().borders(Borders::ALL).title(title));
+        let title = if app.current_screen == CurrentScreen::Adding { " NEW_ENTRY " } else { " EDIT_ENTRY " };
+        let input = Paragraph::new(format!("> {}", app.input))
+            .style(Style::default().fg(primary_text))
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Plain)
+                .border_style(Style::default().fg(accent_blue))
+                .title(title).title_style(Style::default().fg(accent_blue)));
         f.render_widget(input, area);
-        f.set_cursor_position((area.x + app.input.len() as u16 + 1, area.y + 1));
+        f.set_cursor_position((area.x + app.input.len() as u16 + 3, area.y + 1));
     } else if app.current_screen == CurrentScreen::ConfirmingDelete {
         let area = centered_rect(40, 20, f.area());
         f.render_widget(Clear, area);
-        let confirm = Paragraph::new("\nAre you sure you want to delete this task?\n\n(y)es / (n)o")
-            .block(Block::default().borders(Borders::ALL).title(" Confirm Delete "))
-            .alignment(ratatui::layout::Alignment::Center);
+        let confirm = Paragraph::new("\nCONFIRM DELETION PROTOCOL\n\n(Y) YES / (N) NO")
+            .style(Style::default().fg(alert_red))
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(alert_red))
+                .title(" SECURITY_OVERRIDE "))
+            .alignment(Alignment::Center);
         f.render_widget(confirm, area);
     }
 }

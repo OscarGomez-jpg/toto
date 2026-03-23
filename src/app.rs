@@ -17,6 +17,7 @@ pub struct App {
     pub input: String,
     pub search_query: String,
     pub editing_id: Option<i64>,
+    pub ticks: u64,
 }
 
 impl App {
@@ -34,7 +35,12 @@ impl App {
             input: String::new(),
             search_query: String::new(),
             editing_id: None,
+            ticks: 0,
         }
+    }
+
+    pub fn on_tick(&mut self) {
+        self.ticks += 1;
     }
 
     pub fn get_filtered_items(&self) -> Vec<Line> {
