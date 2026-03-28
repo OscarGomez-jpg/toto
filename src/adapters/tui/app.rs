@@ -221,7 +221,9 @@ impl App {
         } else {
             self.start_date_input.clone()
         };
-        DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc))
+        DateTime::parse_from_rfc3339(&s)
+            .ok()
+            .map(|d| d.with_timezone(&Utc))
     }
 
     pub fn parse_end_date(&self) -> Option<DateTime<Utc>> {
@@ -233,6 +235,8 @@ impl App {
         } else {
             self.end_date_input.clone()
         };
-        DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc))
+        DateTime::parse_from_rfc3339(&s)
+            .ok()
+            .map(|d| d.with_timezone(&Utc))
     }
 }

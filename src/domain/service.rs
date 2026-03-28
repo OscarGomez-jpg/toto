@@ -1,9 +1,9 @@
 use crate::domain::task::Task;
 use crate::ports::inbound::TaskServicePort;
 use crate::ports::outbound::TaskRepository;
+use chrono::{DateTime, Utc};
 use std::error::Error;
 use std::sync::Arc;
-use chrono::{DateTime, Utc};
 
 pub struct TaskService {
     repository: Arc<dyn TaskRepository>,
@@ -16,13 +16,20 @@ impl TaskService {
 }
 
 impl TaskServicePort for TaskService {
-    fn add_task(&self, content: String, start_date: Option<DateTime<Utc>>, end_date: Option<DateTime<Utc>>) -> Result<String, Box<dyn Error>> {
+    fn add_task(
+        &self,
+        content: String,
+        start_date: Option<DateTime<Utc>>,
+        end_date: Option<DateTime<Utc>>,
+    ) -> Result<String, Box<dyn Error>> {
         let mut task = Task::new("temp".to_string(), content.clone());
         task.start_date = start_date;
         task.end_date = end_date;
-        
+
         if !task.is_valid_range() {
-            return Err("Invalid date range: start date must be before or equal to end date".into());
+            return Err(
+                "Invalid date range: start date must be before or equal to end date".into(),
+            );
         }
 
         self.repository.add(content, start_date, end_date)
@@ -40,16 +47,25 @@ impl TaskServicePort for TaskService {
         self.repository.toggle_important(id)
     }
 
-    fn update_task_content(&self, id: String, content: String, start_date: Option<DateTime<Utc>>, end_date: Option<DateTime<Utc>>) -> Result<(), Box<dyn Error>> {
+    fn update_task_content(
+        &self,
+        id: String,
+        content: String,
+        start_date: Option<DateTime<Utc>>,
+        end_date: Option<DateTime<Utc>>,
+    ) -> Result<(), Box<dyn Error>> {
         let mut task = Task::new(id.clone(), content.clone());
         task.start_date = start_date;
         task.end_date = end_date;
 
         if !task.is_valid_range() {
-            return Err("Invalid date range: start date must be before or equal to end date".into());
+            return Err(
+                "Invalid date range: start date must be before or equal to end date".into(),
+            );
         }
 
-        self.repository.update_content(id, content, start_date, end_date)
+        self.repository
+            .update_content(id, content, start_date, end_date)
     }
 
     fn remove_task(&self, id: String) -> Result<String, Box<dyn Error>> {

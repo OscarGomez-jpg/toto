@@ -22,7 +22,6 @@ impl Task {
         }
     }
 
-    /// Business Rule: Ensures the start date is not after the end date.
     pub fn is_valid_range(&self) -> bool {
         match (self.start_date, self.end_date) {
             (Some(start), Some(end)) => start <= end,

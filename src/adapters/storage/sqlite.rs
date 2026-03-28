@@ -57,7 +57,10 @@ impl SqliteRepository {
             .collect::<Result<Vec<_>, _>>()?;
 
         if !columns.contains(&"completed".to_string()) {
-            conn.execute("ALTER TABLE todo ADD COLUMN completed INTEGER DEFAULT 0", [])?;
+            conn.execute(
+                "ALTER TABLE todo ADD COLUMN completed INTEGER DEFAULT 0",
+                [],
+            )?;
         }
         if !columns.contains(&"position".to_string()) {
             conn.execute("ALTER TABLE todo ADD COLUMN position INTEGER", [])?;
@@ -69,7 +72,10 @@ impl SqliteRepository {
             // If we have an old due_date column, migrate its data to end_date
             conn.execute("ALTER TABLE todo ADD COLUMN end_date TEXT", [])?;
             if columns.contains(&"due_date".to_string()) {
-                conn.execute("UPDATE todo SET end_date = due_date WHERE end_date IS NULL", [])?;
+                conn.execute(
+                    "UPDATE todo SET end_date = due_date WHERE end_date IS NULL",
+                    [],
+                )?;
             }
         }
 
@@ -111,10 +117,18 @@ impl SqliteRepository {
 }
 
 impl TaskRepository for SqliteRepository {
-    fn add(&self, content: String, start_date: Option<DateTime<Utc>>, end_date: Option<DateTime<Utc>>) -> Result<String, Box<dyn Error>> {
+    fn add(
+        &self,
+        content: String,
+        start_date: Option<DateTime<Utc>>,
+        end_date: Option<DateTime<Utc>>,
+    ) -> Result<String, Box<dyn Error>> {
         let conn = self.conn.lock().unwrap();
         let id = Uuid::new_v4().to_string();
-        let max_pos: i64 = conn.query_row("SELECT IFNULL(MAX(position), 0) FROM todo", [], |row| row.get(0))?;
+        let max_pos: i64 =
+            conn.query_row("SELECT IFNULL(MAX(position), 0) FROM todo", [], |row| {
+                row.get(0)
+            })?;
         conn.execute(
             "INSERT INTO todo (id, content, position, start_date, end_date) VALUES (?, ?, ?, ?, ?)",
             params![
@@ -134,9 +148,17 @@ impl TaskRepository for SqliteRepository {
         let todo_iter = stmt.query_map([], |row| {
             let start_date_str: Option<String> = row.get(4)?;
             let end_date_str: Option<String> = row.get(5)?;
-            
-            let start_date = start_date_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc)));
-            let end_date = end_date_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc)));
+
+            let start_date = start_date_str.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|d| d.with_timezone(&Utc))
+            });
+            let end_date = end_date_str.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|d| d.with_timezone(&Utc))
+            });
 
             let mut task = Task::new(row.get(0)?, row.get(1)?);
             task.important = row.get::<_, i32>(2)? != 0;
@@ -172,7 +194,13 @@ impl TaskRepository for SqliteRepository {
         Ok(())
     }
 
-    fn update_content(&self, id: String, content: String, start_date: Option<DateTime<Utc>>, end_date: Option<DateTime<Utc>>) -> Result<(), Box<dyn Error>> {
+    fn update_content(
+        &self,
+        id: String,
+        content: String,
+        start_date: Option<DateTime<Utc>>,
+        end_date: Option<DateTime<Utc>>,
+    ) -> Result<(), Box<dyn Error>> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE todo SET content = ?, start_date = ?, end_date = ? WHERE id = ?",
@@ -200,21 +228,45 @@ impl TaskRepository for SqliteRepository {
 
     fn move_task(&self, id: String, delta: i32) -> Result<(), Box<dyn Error>> {
         let conn = self.conn.lock().unwrap();
-        let current_pos: i64 = conn.query_row("SELECT position FROM todo WHERE id = ?", params![id], |row| row.get(0))?;
-        
+        let current_pos: i64 = conn.query_row(
+            "SELECT position FROM todo WHERE id = ?",
+            params![id],
+            |row| row.get(0),
+        )?;
+
         // Find the task to swap with
         let target_id: Option<String> = if delta > 0 {
             // Move up (increase position)
-            conn.query_row("SELECT id FROM todo WHERE position > ? ORDER BY position ASC LIMIT 1", params![current_pos], |row| row.get(0)).ok()
+            conn.query_row(
+                "SELECT id FROM todo WHERE position > ? ORDER BY position ASC LIMIT 1",
+                params![current_pos],
+                |row| row.get(0),
+            )
+            .ok()
         } else {
             // Move down (decrease position)
-            conn.query_row("SELECT id FROM todo WHERE position < ? ORDER BY position DESC LIMIT 1", params![current_pos], |row| row.get(0)).ok()
+            conn.query_row(
+                "SELECT id FROM todo WHERE position < ? ORDER BY position DESC LIMIT 1",
+                params![current_pos],
+                |row| row.get(0),
+            )
+            .ok()
         };
 
         if let Some(tid) = target_id {
-            let target_pos: i64 = conn.query_row("SELECT position FROM todo WHERE id = ?", params![tid], |row| row.get(0))?;
-            conn.execute("UPDATE todo SET position = ? WHERE id = ?", params![target_pos, id])?;
-            conn.execute("UPDATE todo SET position = ? WHERE id = ?", params![current_pos, tid])?;
+            let target_pos: i64 = conn.query_row(
+                "SELECT position FROM todo WHERE id = ?",
+                params![tid],
+                |row| row.get(0),
+            )?;
+            conn.execute(
+                "UPDATE todo SET position = ? WHERE id = ?",
+                params![target_pos, id],
+            )?;
+            conn.execute(
+                "UPDATE todo SET position = ? WHERE id = ?",
+                params![current_pos, tid],
+            )?;
         }
 
         Ok(())
