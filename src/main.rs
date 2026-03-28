@@ -344,7 +344,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                             InputFocus::StartDate => app.start_date_input.push(c),
                             InputFocus::EndDate => app.end_date_input.push(c),
                         },
-                        KeyCode::Backspace if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                        KeyCode::Backspace
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                        {
                             let target = match app.input_focus {
                                 InputFocus::Content => &mut app.input,
                                 InputFocus::StartDate => &mut app.start_date_input,
@@ -461,7 +463,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                             InputFocus::StartDate => app.start_date_input.push(c),
                             InputFocus::EndDate => app.end_date_input.push(c),
                         },
-                        KeyCode::Backspace if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                        KeyCode::Backspace
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                        {
                             let target = match app.input_focus {
                                 InputFocus::Content => &mut app.input,
                                 InputFocus::StartDate => &mut app.start_date_input,
@@ -548,9 +552,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                             app.remove_selected();
                             app.current_screen = CurrentScreen::Main;
                         }
-                        KeyCode::Char('n')
-                        | KeyCode::Esc
-                        | KeyCode::Char('c')
+                        KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('c')
                             if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
                         {
                             app.current_screen = CurrentScreen::Main;
