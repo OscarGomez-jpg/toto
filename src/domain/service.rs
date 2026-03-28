@@ -3,6 +3,7 @@ use crate::ports::inbound::TaskServicePort;
 use crate::ports::outbound::TaskRepository;
 use std::error::Error;
 use std::sync::Arc;
+use chrono::{DateTime, Utc};
 
 pub struct TaskService {
     repository: Arc<dyn TaskRepository>,
@@ -15,8 +16,16 @@ impl TaskService {
 }
 
 impl TaskServicePort for TaskService {
-    fn add_task(&self, content: String) -> Result<String, Box<dyn Error>> {
-        self.repository.add(content)
+    fn add_task(&self, content: String, start_date: Option<DateTime<Utc>>, end_date: Option<DateTime<Utc>>) -> Result<String, Box<dyn Error>> {
+        let mut task = Task::new("temp".to_string(), content.clone());
+        task.start_date = start_date;
+        task.end_date = end_date;
+        
+        if !task.is_valid_range() {
+            return Err("Invalid date range: start date must be before or equal to end date".into());
+        }
+
+        self.repository.add(content, start_date, end_date)
     }
 
     fn get_all_tasks(&self) -> Result<Vec<Task>, Box<dyn Error>> {
@@ -31,8 +40,16 @@ impl TaskServicePort for TaskService {
         self.repository.toggle_important(id)
     }
 
-    fn update_task_content(&self, id: String, content: String) -> Result<(), Box<dyn Error>> {
-        self.repository.update_content(id, content)
+    fn update_task_content(&self, id: String, content: String, start_date: Option<DateTime<Utc>>, end_date: Option<DateTime<Utc>>) -> Result<(), Box<dyn Error>> {
+        let mut task = Task::new(id.clone(), content.clone());
+        task.start_date = start_date;
+        task.end_date = end_date;
+
+        if !task.is_valid_range() {
+            return Err("Invalid date range: start date must be before or equal to end date".into());
+        }
+
+        self.repository.update_content(id, content, start_date, end_date)
     }
 
     fn remove_task(&self, id: String) -> Result<String, Box<dyn Error>> {

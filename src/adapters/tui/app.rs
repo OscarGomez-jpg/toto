@@ -1,8 +1,8 @@
 use crate::domain::task::Task;
 use crate::ports::inbound::TaskServicePort;
+use chrono::{DateTime, Utc};
 use ratatui::widgets::ListState;
 use std::sync::Arc;
-use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(PartialEq)]
 pub enum CurrentScreen {
@@ -13,15 +13,24 @@ pub enum CurrentScreen {
     ConfirmingDelete,
 }
 
+#[derive(PartialEq)]
+pub enum InputFocus {
+    Content,
+    StartDate,
+    EndDate,
+}
+
 pub struct App {
     pub task_service: Arc<dyn TaskServicePort>,
     pub current_screen: CurrentScreen,
+    pub input_focus: InputFocus,
     pub list_state: ListState,
     pub input: String,
+    pub start_date_input: String,
+    pub end_date_input: String,
     pub search_query: String,
     pub editing_id: Option<String>,
     pub ticks: u64,
-    pub scroll_offset: usize,
 }
 
 impl App {
@@ -36,12 +45,14 @@ impl App {
         App {
             task_service,
             current_screen: CurrentScreen::Main,
+            input_focus: InputFocus::Content,
             list_state,
             input: String::new(),
+            start_date_input: String::new(),
+            end_date_input: String::new(),
             search_query: String::new(),
             editing_id: None,
             ticks: 0,
-            scroll_offset: 0,
         }
     }
 
@@ -193,7 +204,35 @@ impl App {
         }
     }
 
-    pub fn cursor_position(&self) -> usize {
-        self.input.graphemes(true).count()
+    pub fn next_field(&mut self) {
+        self.input_focus = match self.input_focus {
+            InputFocus::Content => InputFocus::StartDate,
+            InputFocus::StartDate => InputFocus::EndDate,
+            InputFocus::EndDate => InputFocus::Content,
+        };
+    }
+
+    pub fn parse_start_date(&self) -> Option<DateTime<Utc>> {
+        if self.start_date_input.is_empty() {
+            return None;
+        }
+        let s = if self.start_date_input.len() == 10 {
+            format!("{}T00:00:00Z", self.start_date_input)
+        } else {
+            self.start_date_input.clone()
+        };
+        DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc))
+    }
+
+    pub fn parse_end_date(&self) -> Option<DateTime<Utc>> {
+        if self.end_date_input.is_empty() {
+            return None;
+        }
+        let s = if self.end_date_input.len() == 10 {
+            format!("{}T23:59:59Z", self.end_date_input)
+        } else {
+            self.end_date_input.clone()
+        };
+        DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc))
     }
 }

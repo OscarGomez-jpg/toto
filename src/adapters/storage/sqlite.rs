@@ -18,17 +18,19 @@ impl SqliteRepository {
         let db_path = Self::get_db_path();
         Self::migrate_files_to_data_dir(&db_path);
 
-        let mut conn = Connection::open(&db_path)?;
+        let conn = Connection::open(&db_path)?;
 
         // 1. Check if we need to migrate id from INTEGER to TEXT
-        let id_type: String = conn.query_row(
-            "SELECT type FROM pragma_table_info('todo') WHERE name='id'",
-            [],
-            |row| row.get(0),
-        ).unwrap_or_else(|_| "INTEGER".to_string());
+        let id_type: String = conn
+            .query_row(
+                "SELECT type FROM pragma_table_info('todo') WHERE name='id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|_| "INTEGER".to_string());
 
         if id_type == "INTEGER" {
-            // Migration needed
+            // Migration from very old numeric ID schema
             conn.execute_batch(
                 "BEGIN TRANSACTION;
                  CREATE TABLE todo_new (
@@ -36,15 +38,39 @@ impl SqliteRepository {
                     content TEXT NOT NULL,
                     important INTEGER DEFAULT 0,
                     completed INTEGER DEFAULT 0,
-                    due_date TEXT,
+                    start_date TEXT,
+                    end_date TEXT,
                     position INTEGER
                  );
-                 INSERT INTO todo_new (id, content, important, completed, due_date, position)
-                 SELECT CAST(id AS TEXT), content, important, completed, due_date, id FROM todo;
+                 INSERT INTO todo_new (id, content, important, completed, position)
+                 SELECT CAST(id AS TEXT), content, important, completed, id FROM todo;
                  DROP TABLE todo;
                  ALTER TABLE todo_new RENAME TO todo;
-                 COMMIT;"
+                 COMMIT;",
             )?;
+        }
+
+        // 2. Ensure all required columns exist
+        let columns: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('todo')")?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if !columns.contains(&"completed".to_string()) {
+            conn.execute("ALTER TABLE todo ADD COLUMN completed INTEGER DEFAULT 0", [])?;
+        }
+        if !columns.contains(&"position".to_string()) {
+            conn.execute("ALTER TABLE todo ADD COLUMN position INTEGER", [])?;
+        }
+        if !columns.contains(&"start_date".to_string()) {
+            conn.execute("ALTER TABLE todo ADD COLUMN start_date TEXT", [])?;
+        }
+        if !columns.contains(&"end_date".to_string()) {
+            // If we have an old due_date column, migrate its data to end_date
+            conn.execute("ALTER TABLE todo ADD COLUMN end_date TEXT", [])?;
+            if columns.contains(&"due_date".to_string()) {
+                conn.execute("UPDATE todo SET end_date = due_date WHERE end_date IS NULL", [])?;
+            }
         }
 
         conn.execute(
@@ -53,16 +79,16 @@ impl SqliteRepository {
                 content TEXT NOT NULL,
                 important INTEGER DEFAULT 0,
                 completed INTEGER DEFAULT 0,
-                due_date TEXT,
+                start_date TEXT,
+                end_date TEXT,
                 position INTEGER
             )",
             [],
         )?;
 
-        let mut repo = SqliteRepository {
+        let repo = SqliteRepository {
             conn: Mutex::new(conn),
         };
-        repo.migrate_from_json(&db_path)?;
         Ok(repo)
     }
 
@@ -82,58 +108,43 @@ impl SqliteRepository {
             let _ = fs::rename(local_db, target_db_path);
         }
     }
-
-    fn migrate_from_json(&mut self, db_path: &Path) -> Result<(), Box<dyn Error>> {
-        let json_path = db_path.with_extension("json");
-        if json_path.exists() {
-            if let Ok(contents) = fs::read_to_string(&json_path) {
-                #[derive(serde::Deserialize)]
-                struct OldLine {
-                    content: String,
-                }
-                #[derive(serde::Deserialize)]
-                struct OldList {
-                    list: Vec<OldLine>,
-                }
-
-                if let Ok(old_data) = serde_json::from_str::<OldList>(&contents) {
-                    for line in old_data.list {
-                        let _ = self.add(line.content);
-                    }
-                    let _ = fs::remove_file(json_path);
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
 impl TaskRepository for SqliteRepository {
-    fn add(&self, content: String) -> Result<String, Box<dyn Error>> {
+    fn add(&self, content: String, start_date: Option<DateTime<Utc>>, end_date: Option<DateTime<Utc>>) -> Result<String, Box<dyn Error>> {
         let conn = self.conn.lock().unwrap();
         let id = Uuid::new_v4().to_string();
         let max_pos: i64 = conn.query_row("SELECT IFNULL(MAX(position), 0) FROM todo", [], |row| row.get(0))?;
         conn.execute(
-            "INSERT INTO todo (id, content, position) VALUES (?, ?, ?)",
-            params![id, content, max_pos + 1],
+            "INSERT INTO todo (id, content, position, start_date, end_date) VALUES (?, ?, ?, ?, ?)",
+            params![
+                id,
+                content,
+                max_pos + 1,
+                start_date.map(|d| d.to_rfc3339()),
+                end_date.map(|d| d.to_rfc3339())
+            ],
         )?;
         Ok(id)
     }
 
     fn get_all(&self) -> Result<Vec<Task>, Box<dyn Error>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, content, important, completed, due_date FROM todo ORDER BY completed ASC, position DESC, id DESC")?;
+        let mut stmt = conn.prepare("SELECT id, content, important, completed, start_date, end_date FROM todo ORDER BY completed ASC, position DESC, id DESC")?;
         let todo_iter = stmt.query_map([], |row| {
-            let due_date_str: Option<String> = row.get(4)?;
-            let due_date = due_date_str.and_then(|s| s.parse::<DateTime<Utc>>().ok());
+            let start_date_str: Option<String> = row.get(4)?;
+            let end_date_str: Option<String> = row.get(5)?;
+            
+            let start_date = start_date_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc)));
+            let end_date = end_date_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc)));
 
-            Ok(Task {
-                id: row.get(0)?,
-                content: row.get(1)?,
-                important: row.get::<_, i32>(2)? != 0,
-                completed: row.get::<_, i32>(3)? != 0,
-                due_date,
-            })
+            let mut task = Task::new(row.get(0)?, row.get(1)?);
+            task.important = row.get::<_, i32>(2)? != 0;
+            task.completed = row.get::<_, i32>(3)? != 0;
+            task.start_date = start_date;
+            task.end_date = end_date;
+
+            Ok(task)
         })?;
 
         let mut tasks = Vec::new();
@@ -161,11 +172,16 @@ impl TaskRepository for SqliteRepository {
         Ok(())
     }
 
-    fn update_content(&self, id: String, content: String) -> Result<(), Box<dyn Error>> {
+    fn update_content(&self, id: String, content: String, start_date: Option<DateTime<Utc>>, end_date: Option<DateTime<Utc>>) -> Result<(), Box<dyn Error>> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE todo SET content = ? WHERE id = ?",
-            params![content, id],
+            "UPDATE todo SET content = ?, start_date = ?, end_date = ? WHERE id = ?",
+            params![
+                content,
+                start_date.map(|d| d.to_rfc3339()),
+                end_date.map(|d| d.to_rfc3339()),
+                id
+            ],
         )?;
         Ok(())
     }

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::adapters::storage::sqlite::SqliteRepository;
-use crate::adapters::tui::app::{App, CurrentScreen};
+use crate::adapters::tui::app::{App, CurrentScreen, InputFocus};
 use crate::adapters::tui::ui::ui;
 use crate::domain::service::TaskService;
 use crate::ports::inbound::TaskServicePort;
@@ -30,7 +30,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .arg(arg!(-c --done <ID> "Toggle completion status of a todo").required(false))
         .arg(arg!(-i --important <ID> "Toggle importance of a todo").required(false))
         .arg(arg!(-e --edit <ID_CONTENT> "Edit a todo (format: 'ID:New Content')").required(false))
-        .arg(arg!(--clear "Clear all completed todos").required(false).num_args(0))
+        .arg(arg!(--start <DATE> "Start date (YYYY-MM-DD)").required(false))
+        .arg(arg!(--end <DATE> "End date (YYYY-MM-DD)").required(false))
+        .arg(
+            arg!(--clear "Clear all completed todos")
+                .required(false)
+                .num_args(0),
+        )
         .get_matches();
 
     // 1. Initialize Adapters (Infrastructure)
@@ -41,8 +47,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut performed_action = false;
 
+    let start_date = matches.get_one::<String>("start").and_then(|s| {
+        let full = if s.len() == 10 {
+            format!("{}T00:00:00Z", s)
+        } else {
+            s.clone()
+        };
+        chrono::DateTime::parse_from_rfc3339(&full)
+            .ok()
+            .map(|d| d.with_timezone(&chrono::Utc))
+    });
+    let end_date = matches.get_one::<String>("end").and_then(|s| {
+        let full = if s.len() == 10 {
+            format!("{}T23:59:59Z", s)
+        } else {
+            s.clone()
+        };
+        chrono::DateTime::parse_from_rfc3339(&full)
+            .ok()
+            .map(|d| d.with_timezone(&chrono::Utc))
+    });
+
     if let Some(content) = matches.get_one::<String>("add") {
-        task_service.add_task(content.to_owned())?;
+        task_service.add_task(content.to_owned(), start_date, end_date)?;
         println!("Added: {}", content);
         performed_action = true;
     }
@@ -67,7 +94,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(id_content) = matches.get_one::<String>("edit") {
         if let Some((id_str, content)) = id_content.split_once(':') {
-            task_service.update_task_content(id_str.trim().to_string(), content.trim().to_string())?;
+            task_service.update_task_content(
+                id_str.trim().to_string(),
+                content.trim().to_string(),
+                start_date,
+                end_date,
+            )?;
             println!("Updated task {} content", id_str);
             performed_action = true;
         } else {
@@ -92,7 +124,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for item in items.iter().take(limit) {
             let status = if item.completed { "[X]" } else { "[ ]" };
             let important = if item.important { "!" } else { " " };
-            let short_id = if item.id.len() > 4 { &item.id[..4] } else { &item.id };
+            let short_id = if item.id.len() > 4 {
+                &item.id[..4]
+            } else {
+                &item.id
+            };
             println!("{} {} {}: {}", important, status, short_id, item.content);
         }
         performed_action = true;
@@ -146,11 +182,18 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
             if let Event::Key(key) = event::read()? {
                 match app.current_screen {
                     CurrentScreen::Main => match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => return Ok(()),
+                        KeyCode::Char('q') | KeyCode::Char('c')
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                        {
+                            return Ok(())
+                        }
                         KeyCode::Char('q') => return Ok(()),
                         KeyCode::Char('a') => {
                             app.current_screen = CurrentScreen::Adding;
                             app.input.clear();
+                            app.start_date_input.clear();
+                            app.end_date_input.clear();
+                            app.input_focus = InputFocus::Content;
                         }
                         KeyCode::Char('e') => {
                             let items = app.get_filtered_items();
@@ -159,6 +202,15 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                                     app.current_screen = CurrentScreen::Editing;
                                     app.editing_id = Some(items[i].id.clone());
                                     app.input = items[i].content.clone();
+                                    app.start_date_input = items[i]
+                                        .start_date
+                                        .map(|d| d.format("%Y-%m-%d").to_string())
+                                        .unwrap_or_default();
+                                    app.end_date_input = items[i]
+                                        .end_date
+                                        .map(|d| d.format("%Y-%m-%d").to_string())
+                                        .unwrap_or_default();
+                                    app.input_focus = InputFocus::Content;
                                 }
                             }
                         }
@@ -176,7 +228,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                                 app.current_screen = CurrentScreen::ConfirmingDelete;
                             }
                         }
-                        KeyCode::Char('l') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                        KeyCode::Char('l')
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                        {
                             let _ = app.task_service.clear_completed_tasks();
                         }
                         KeyCode::Char('/') => {
@@ -208,7 +262,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                         KeyCode::Char('G') => {
                             app.move_to_bottom();
                         }
-                        KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                        KeyCode::Char('u')
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                        {
                             app.page_up();
                         }
                         KeyCode::Home => app.move_to_top(),
@@ -221,22 +277,52 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                         _ => {}
                     },
                     CurrentScreen::Adding => match key.code {
+                        KeyCode::Tab => {
+                            app.next_field();
+                        }
+                        KeyCode::BackTab => {
+                            app.next_field();
+                            app.next_field();
+                        }
                         KeyCode::Enter => {
                             if !app.input.is_empty() {
-                                let _ = app.task_service.add_task(app.input.clone());
+                                let start = app.parse_start_date();
+                                let end = app.parse_end_date();
+                                let _ = app.task_service.add_task(app.input.clone(), start, end);
                                 app.current_screen = CurrentScreen::Main;
                                 app.input.clear();
+                                app.start_date_input.clear();
+                                app.end_date_input.clear();
+                                app.input_focus = InputFocus::Content;
                             }
                         }
-                        KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                        KeyCode::Char('c')
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                        {
                             app.current_screen = CurrentScreen::Main;
                             app.input.clear();
+                            app.start_date_input.clear();
+                            app.end_date_input.clear();
+                            app.input_focus = InputFocus::Content;
                         }
-                        KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                            app.input.clear();
+                        KeyCode::Char('u')
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                        {
+                            match app.input_focus {
+                                InputFocus::Content => app.input.clear(),
+                                InputFocus::StartDate => app.start_date_input.clear(),
+                                InputFocus::EndDate => app.end_date_input.clear(),
+                            }
                         }
-                        KeyCode::Char('w') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                            let mut graphemes = app.input.graphemes(true).collect::<Vec<&str>>();
+                        KeyCode::Char('w')
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                        {
+                            let target = match app.input_focus {
+                                InputFocus::Content => &mut app.input,
+                                InputFocus::StartDate => &mut app.start_date_input,
+                                InputFocus::EndDate => &mut app.end_date_input,
+                            };
+                            let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
                             while let Some(last) = graphemes.last() {
                                 if last.chars().all(|c| c.is_whitespace()) {
                                     graphemes.pop();
@@ -251,10 +337,20 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                                     break;
                                 }
                             }
-                            app.input = graphemes.concat();
+                            *target = graphemes.concat();
                         }
+                        KeyCode::Char(c) => match app.input_focus {
+                            InputFocus::Content => app.input.push(c),
+                            InputFocus::StartDate => app.start_date_input.push(c),
+                            InputFocus::EndDate => app.end_date_input.push(c),
+                        },
                         KeyCode::Backspace if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                            let mut graphemes = app.input.graphemes(true).collect::<Vec<&str>>();
+                            let target = match app.input_focus {
+                                InputFocus::Content => &mut app.input,
+                                InputFocus::StartDate => &mut app.start_date_input,
+                                InputFocus::EndDate => &mut app.end_date_input,
+                            };
+                            let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
                             while let Some(last) = graphemes.last() {
                                 if last.chars().all(|c| c.is_whitespace()) {
                                     graphemes.pop();
@@ -269,37 +365,81 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                                     break;
                                 }
                             }
-                            app.input = graphemes.concat();
+                            *target = graphemes.concat();
                         }
-                        KeyCode::Char(c) => app.input.push(c),
                         KeyCode::Backspace => {
-                            let mut graphemes = app.input.graphemes(true).collect::<Vec<&str>>();
+                            let target = match app.input_focus {
+                                InputFocus::Content => &mut app.input,
+                                InputFocus::StartDate => &mut app.start_date_input,
+                                InputFocus::EndDate => &mut app.end_date_input,
+                            };
+                            let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
                             graphemes.pop();
-                            app.input = graphemes.concat();
+                            *target = graphemes.concat();
                         }
                         KeyCode::Esc => {
                             app.current_screen = CurrentScreen::Main;
+                            app.input.clear();
+                            app.start_date_input.clear();
+                            app.end_date_input.clear();
+                            app.input_focus = InputFocus::Content;
                         }
                         _ => {}
                     },
                     CurrentScreen::Editing => match key.code {
+                        KeyCode::Tab => {
+                            app.next_field();
+                        }
+                        KeyCode::BackTab => {
+                            app.next_field();
+                            app.next_field();
+                        }
                         KeyCode::Enter => {
                             if let Some(id) = &app.editing_id {
-                                let _ = app.task_service.update_task_content(id.clone(), app.input.clone());
+                                let start = app.parse_start_date();
+                                let end = app.parse_end_date();
+                                let _ = app.task_service.update_task_content(
+                                    id.clone(),
+                                    app.input.clone(),
+                                    start,
+                                    end,
+                                );
                                 app.current_screen = CurrentScreen::Main;
                                 app.input.clear();
+                                app.start_date_input.clear();
+                                app.end_date_input.clear();
                                 app.editing_id = None;
+                                app.input_focus = InputFocus::Content;
                             }
                         }
-                        KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                        KeyCode::Char('c')
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                        {
                             app.current_screen = CurrentScreen::Main;
                             app.input.clear();
+                            app.start_date_input.clear();
+                            app.end_date_input.clear();
+                            app.editing_id = None;
+                            app.input_focus = InputFocus::Content;
                         }
-                        KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                            app.input.clear();
+                        KeyCode::Char('u')
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                        {
+                            match app.input_focus {
+                                InputFocus::Content => app.input.clear(),
+                                InputFocus::StartDate => app.start_date_input.clear(),
+                                InputFocus::EndDate => app.end_date_input.clear(),
+                            }
                         }
-                        KeyCode::Char('w') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                            let mut graphemes = app.input.graphemes(true).collect::<Vec<&str>>();
+                        KeyCode::Char('w')
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                        {
+                            let target = match app.input_focus {
+                                InputFocus::Content => &mut app.input,
+                                InputFocus::StartDate => &mut app.start_date_input,
+                                InputFocus::EndDate => &mut app.end_date_input,
+                            };
+                            let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
                             while let Some(last) = graphemes.last() {
                                 if last.chars().all(|c| c.is_whitespace()) {
                                     graphemes.pop();
@@ -314,10 +454,20 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                                     break;
                                 }
                             }
-                            app.input = graphemes.concat();
+                            *target = graphemes.concat();
                         }
+                        KeyCode::Char(c) => match app.input_focus {
+                            InputFocus::Content => app.input.push(c),
+                            InputFocus::StartDate => app.start_date_input.push(c),
+                            InputFocus::EndDate => app.end_date_input.push(c),
+                        },
                         KeyCode::Backspace if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                            let mut graphemes = app.input.graphemes(true).collect::<Vec<&str>>();
+                            let target = match app.input_focus {
+                                InputFocus::Content => &mut app.input,
+                                InputFocus::StartDate => &mut app.start_date_input,
+                                InputFocus::EndDate => &mut app.end_date_input,
+                            };
+                            let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
                             while let Some(last) = graphemes.last() {
                                 if last.chars().all(|c| c.is_whitespace()) {
                                     graphemes.pop();
@@ -332,18 +482,25 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                                     break;
                                 }
                             }
-                            app.input = graphemes.concat();
+                            *target = graphemes.concat();
                         }
-                        KeyCode::Char(c) => app.input.push(c),
                         KeyCode::Backspace => {
-                            let mut graphemes = app.input.graphemes(true).collect::<Vec<&str>>();
+                            let target = match app.input_focus {
+                                InputFocus::Content => &mut app.input,
+                                InputFocus::StartDate => &mut app.start_date_input,
+                                InputFocus::EndDate => &mut app.end_date_input,
+                            };
+                            let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
                             graphemes.pop();
-                            app.input = graphemes.concat();
+                            *target = graphemes.concat();
                         }
                         KeyCode::Esc => {
                             app.current_screen = CurrentScreen::Main;
                             app.input.clear();
+                            app.start_date_input.clear();
+                            app.end_date_input.clear();
                             app.editing_id = None;
+                            app.input_focus = InputFocus::Content;
                         }
                         _ => {}
                     },
@@ -355,8 +512,11 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                             app.search_query.push(c);
                             app.list_state.select(Some(0));
                         }
-                        KeyCode::Backspace if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                            let mut graphemes = app.search_query.graphemes(true).collect::<Vec<&str>>();
+                        KeyCode::Backspace
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                        {
+                            let mut graphemes =
+                                app.search_query.graphemes(true).collect::<Vec<&str>>();
                             while let Some(last) = graphemes.last() {
                                 if last.chars().all(|c| c.is_whitespace()) {
                                     graphemes.pop();
@@ -375,7 +535,8 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                             app.list_state.select(Some(0));
                         }
                         KeyCode::Backspace => {
-                            let mut graphemes = app.search_query.graphemes(true).collect::<Vec<&str>>();
+                            let mut graphemes =
+                                app.search_query.graphemes(true).collect::<Vec<&str>>();
                             graphemes.pop();
                             app.search_query = graphemes.concat();
                             app.list_state.select(Some(0));
@@ -387,7 +548,11 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                             app.remove_selected();
                             app.current_screen = CurrentScreen::Main;
                         }
-                        KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                        KeyCode::Char('n')
+                        | KeyCode::Esc
+                        | KeyCode::Char('c')
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                        {
                             app.current_screen = CurrentScreen::Main;
                         }
                         _ => {

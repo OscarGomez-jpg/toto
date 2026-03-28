@@ -106,6 +106,14 @@ pub fn ui(f: &mut Frame, app: &mut App) {
             } else {
                 &item.id
             };
+
+            let date_str = match (item.start_date, item.end_date) {
+                (Some(s), Some(e)) => format!(" ({: >10} -> {: >10})", s.format("%Y-%m-%d"), e.format("%Y-%m-%d")),
+                (Some(s), None) => format!(" (Start: {: >10})", s.format("%Y-%m-%d")),
+                (None, Some(e)) => format!(" (End: {: >10})", e.format("%Y-%m-%d")),
+                (None, None) => "".to_string(),
+            };
+
             let content = Line::from(vec![
                 Span::styled(format!("{:<4} ", short_id), Style::default().fg(dim_text)),
                 Span::styled(format!("{} ", status_icon), icon_style),
@@ -118,6 +126,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
                     },
                 ),
                 Span::styled(format!("{}", item.content), text_style),
+                Span::styled(date_str, Style::default().fg(dim_text).add_modifier(Modifier::ITALIC)),
             ]);
             ListItem::new(content)
         })
@@ -220,7 +229,9 @@ pub fn ui(f: &mut Frame, app: &mut App) {
 
     // --- FOOTER ---
     let help_message = match app.current_screen {
-        CurrentScreen::Main => "a:add  e:edit  c:done  S-j/k:move  g/G:top/bot  ^d/^u:pg  ^l:clear  /:search  q:quit",
+        CurrentScreen::Main => {
+            "a:add  e:edit  c:done  S-j/k:move  g/G:top/bot  ^d/^u:pg  ^l:clear  /:search  q:quit"
+        }
         CurrentScreen::Adding => "enter:save  ^c/^u:clear  ^w:word  esc:cancel",
         CurrentScreen::Editing => "enter:update  ^c/^u:clear  ^w:word  esc:cancel",
         CurrentScreen::Searching => "enter:done  esc:reset",
@@ -235,65 +246,106 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     if app.current_screen == CurrentScreen::Adding || app.current_screen == CurrentScreen::Editing {
         let terminal_height = f.area().height;
         let terminal_width = f.area().width;
-        
-        // 15% height limit, at least 5 lines
-        let max_popup_height = (terminal_height as f32 * 0.15).max(5.0) as u16;
-        let popup_width = (terminal_width as f32 * 0.6).max(30.0) as u16;
-        let inner_width = popup_width.saturating_sub(2);
-        
-        let text_len = app.input.graphemes(true).count();
-        let total_content_len = text_len + 2; // for "> "
-        
-        let lines_needed = if inner_width > 0 {
-            ((total_content_len as u16 + inner_width - 1) / inner_width).max(1) + 2 // +2 for borders
-        } else {
-            5
-        };
-        let popup_height = lines_needed.min(max_popup_height);
+
+        // Popup takes 70% width and 40% height (or enough for fields)
+        let popup_width = (terminal_width as f32 * 0.7).max(40.0) as u16;
+        let popup_height = (terminal_height as f32 * 0.4).max(12.0).min(terminal_height as f32 * 0.8) as u16;
         let area = centered_rect_fixed(popup_width, popup_height, f.area());
         f.render_widget(Clear, area);
-        
-        let title = if app.current_screen == CurrentScreen::Adding {
-            " Add Task "
-        } else {
-            " Edit Task "
-        };
-        
-        let input_block = Block::default()
+
+        let title = if app.current_screen == CurrentScreen::Adding { " Add Task " } else { " Edit Task " };
+        let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(accent_blue))
             .bg(card_bg)
-            .title(title)
-            .title_style(Style::default().fg(accent_blue));
+            .title(title);
+        f.render_widget(block, area);
 
-        // Scroll calculation
-        let max_inner_height = popup_height.saturating_sub(2);
-        let cursor_pos = total_content_len as u16;
-        let cursor_line = if inner_width > 0 { cursor_pos / inner_width } else { 0 };
-        let scroll = if cursor_line >= max_inner_height {
-            cursor_line - max_inner_height + 1
-        } else {
-            0
-        };
+        let inner_area = area.inner(ratatui::layout::Margin { vertical: 1, horizontal: 1 });
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(3),    // Content
+                Constraint::Length(3), // Start Date
+                Constraint::Length(3), // End Date
+                Constraint::Length(1), // Hint
+            ])
+            .split(inner_area);
 
-        let input = Paragraph::new(format!("> {}", app.input))
-            .style(Style::default().fg(primary_text))
-            .block(input_block)
+        // 1. Content Field
+        let content_block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Task Description ")
+            .border_style(if app.input_focus == crate::adapters::tui::app::InputFocus::Content {
+                Style::default().fg(accent_blue)
+            } else {
+                Style::default().fg(dim_text)
+            });
+
+        let inner_width = chunks[0].width.saturating_sub(2);
+        let text_len = app.input.graphemes(true).count() + 2;
+        let cursor_line = if inner_width > 0 { (text_len as u16) / inner_width } else { 0 };
+        let max_inner_h = chunks[0].height.saturating_sub(2);
+        let scroll = if cursor_line >= max_inner_h { cursor_line - max_inner_h + 1 } else { 0 };
+
+        let content_input = Paragraph::new(format!("> {}", app.input))
+            .block(content_block)
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0));
-        
-        f.render_widget(input, area);
+        f.render_widget(content_input, chunks[0]);
 
-        // Cursor positioning
-        if inner_width > 0 {
-            let cursor_x = cursor_pos % inner_width;
-            let display_y = cursor_line.saturating_sub(scroll);
+        if app.input_focus == crate::adapters::tui::app::InputFocus::Content && inner_width > 0 {
             f.set_cursor_position((
-                area.x + 1 + cursor_x,
-                area.y + 1 + display_y
+                chunks[0].x + 1 + (text_len as u16 % inner_width),
+                chunks[0].y + 1 + cursor_line.saturating_sub(scroll)
             ));
         }
+
+        // 2. Start Date Field
+        let start_block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Start Date (YYYY-MM-DD) ")
+            .border_style(if app.input_focus == crate::adapters::tui::app::InputFocus::StartDate {
+                Style::default().fg(accent_blue)
+            } else {
+                Style::default().fg(dim_text)
+            });
+        let start_input = Paragraph::new(app.start_date_input.as_str()).block(start_block);
+        f.render_widget(start_input, chunks[1]);
+
+        if app.input_focus == crate::adapters::tui::app::InputFocus::StartDate {
+            f.set_cursor_position((
+                chunks[1].x + 1 + app.start_date_input.graphemes(true).count() as u16,
+                chunks[1].y + 1
+            ));
+        }
+
+        // 3. End Date Field
+        let end_block = Block::default()
+            .borders(Borders::ALL)
+            .title(" End Date (YYYY-MM-DD) ")
+            .border_style(if app.input_focus == crate::adapters::tui::app::InputFocus::EndDate {
+                Style::default().fg(accent_blue)
+            } else {
+                Style::default().fg(dim_text)
+            });
+        let end_input = Paragraph::new(app.end_date_input.as_str()).block(end_block);
+        f.render_widget(end_input, chunks[2]);
+
+        if app.input_focus == crate::adapters::tui::app::InputFocus::EndDate {
+            f.set_cursor_position((
+                chunks[2].x + 1 + app.end_date_input.graphemes(true).count() as u16,
+                chunks[2].y + 1
+            ));
+        }
+
+        let hint = Paragraph::new("Tab: Next Field | Enter: Save | Esc: Cancel")
+            .style(Style::default().fg(dim_text))
+            .alignment(Alignment::Center);
+        f.render_widget(hint, chunks[3]);
+
     } else if app.current_screen == CurrentScreen::ConfirmingDelete {
+
         let area = centered_rect(40, 20, f.area());
         f.render_widget(Clear, area);
         let confirm = Paragraph::new("\nConfirm deletion?\n\n(y) Yes / (n) No")
