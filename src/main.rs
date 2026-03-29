@@ -194,6 +194,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                             app.start_date_input.clear();
                             app.end_date_input.clear();
                             app.input_focus = InputFocus::Content;
+                            app.sync_selected_date();
                         }
                         KeyCode::Char('e') => {
                             let items = app.get_filtered_items();
@@ -211,6 +212,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                                         .map(|d| d.format("%Y-%m-%d").to_string())
                                         .unwrap_or_default();
                                     app.input_focus = InputFocus::Content;
+                                    app.sync_selected_date();
                                 }
                             }
                         }
@@ -262,6 +264,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                         KeyCode::Char('G') => {
                             app.move_to_bottom();
                         }
+                        KeyCode::Char('v') => {
+                            app.current_screen = CurrentScreen::Gantt;
+                        }
                         KeyCode::Char('u')
                             if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
                         {
@@ -276,6 +281,18 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                         }
                         _ => {}
                     },
+                    CurrentScreen::Gantt => match key.code {
+                        KeyCode::Char('q') | KeyCode::Char('v') | KeyCode::Esc => {
+                            app.current_screen = CurrentScreen::Main;
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            app.next();
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            app.previous();
+                        }
+                        _ => {}
+                    },
                     CurrentScreen::Adding => match key.code {
                         KeyCode::Tab => {
                             app.next_field();
@@ -283,6 +300,21 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                         KeyCode::BackTab => {
                             app.next_field();
                             app.next_field();
+                        }
+                        KeyCode::Left if app.input_focus != InputFocus::Content => {
+                            app.move_date_left();
+                        }
+                        KeyCode::Right if app.input_focus != InputFocus::Content => {
+                            app.move_date_right();
+                        }
+                        KeyCode::Up if app.input_focus != InputFocus::Content => {
+                            app.move_date_up();
+                        }
+                        KeyCode::Down if app.input_focus != InputFocus::Content => {
+                            app.move_date_down();
+                        }
+                        KeyCode::Char(' ') if app.input_focus != InputFocus::Content => {
+                            app.select_date();
                         }
                         KeyCode::Enter => {
                             if !app.input.is_empty() {
@@ -395,6 +427,21 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                         KeyCode::BackTab => {
                             app.next_field();
                             app.next_field();
+                        }
+                        KeyCode::Left if app.input_focus != InputFocus::Content => {
+                            app.move_date_left();
+                        }
+                        KeyCode::Right if app.input_focus != InputFocus::Content => {
+                            app.move_date_right();
+                        }
+                        KeyCode::Up if app.input_focus != InputFocus::Content => {
+                            app.move_date_up();
+                        }
+                        KeyCode::Down if app.input_focus != InputFocus::Content => {
+                            app.move_date_down();
+                        }
+                        KeyCode::Char(' ') if app.input_focus != InputFocus::Content => {
+                            app.select_date();
                         }
                         KeyCode::Enter => {
                             if let Some(id) = &app.editing_id {

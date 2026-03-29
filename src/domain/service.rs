@@ -22,7 +22,7 @@ impl TaskServicePort for TaskService {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
     ) -> Result<String, Box<dyn Error>> {
-        let mut task = Task::new("temp".to_string(), content.clone());
+        let mut task = Task::new(String::new(), content.clone());
         task.start_date = start_date;
         task.end_date = end_date;
 

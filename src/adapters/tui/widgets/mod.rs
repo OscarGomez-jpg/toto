@@ -5,3 +5,4 @@ pub mod sidebar;
 pub mod footer;
 pub mod popups;
 pub mod utils;
+pub mod gantt;

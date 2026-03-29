@@ -1,8 +1,9 @@
 use crate::domain::task::Task;
 use crate::ports::inbound::TaskServicePort;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use ratatui::widgets::ListState;
 use std::sync::Arc;
+use time::Month;
 
 #[derive(PartialEq)]
 pub enum CurrentScreen {
@@ -11,6 +12,7 @@ pub enum CurrentScreen {
     Editing,
     Searching,
     ConfirmingDelete,
+    Gantt,
 }
 
 #[derive(PartialEq)]
@@ -30,6 +32,7 @@ pub struct App {
     pub end_date_input: String,
     pub search_query: String,
     pub editing_id: Option<String>,
+    pub selected_date: chrono::NaiveDate,
     pub ticks: u64,
 }
 
@@ -52,6 +55,7 @@ impl App {
             end_date_input: String::new(),
             search_query: String::new(),
             editing_id: None,
+            selected_date: Utc::now().date_naive(),
             ticks: 0,
         }
     }
@@ -210,6 +214,21 @@ impl App {
             InputFocus::StartDate => InputFocus::EndDate,
             InputFocus::EndDate => InputFocus::Content,
         };
+        self.sync_selected_date();
+    }
+
+    pub fn sync_selected_date(&mut self) {
+        let date_str = match self.input_focus {
+            InputFocus::StartDate => &self.start_date_input,
+            InputFocus::EndDate => &self.end_date_input,
+            _ => return,
+        };
+
+        if let Ok(date) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+            self.selected_date = date;
+        } else {
+            self.selected_date = Utc::now().date_naive();
+        }
     }
 
     pub fn parse_start_date(&self) -> Option<DateTime<Utc>> {
@@ -238,5 +257,49 @@ impl App {
         DateTime::parse_from_rfc3339(&s)
             .ok()
             .map(|d| d.with_timezone(&Utc))
+    }
+
+    pub fn move_date_left(&mut self) {
+        self.selected_date = self.selected_date.pred_opt().unwrap_or(self.selected_date);
+    }
+
+    pub fn move_date_right(&mut self) {
+        self.selected_date = self.selected_date.succ_opt().unwrap_or(self.selected_date);
+    }
+
+    pub fn move_date_up(&mut self) {
+        if let Some(d) = self.selected_date.checked_sub_days(chrono::Days::new(7)) {
+            self.selected_date = d;
+        }
+    }
+
+    pub fn move_date_down(&mut self) {
+        if let Some(d) = self.selected_date.checked_add_days(chrono::Days::new(7)) {
+            self.selected_date = d;
+        }
+    }
+
+    pub fn select_date(&mut self) {
+        let date_str = self.selected_date.format("%Y-%m-%d").to_string();
+        match self.input_focus {
+            InputFocus::StartDate => self.start_date_input = date_str,
+            InputFocus::EndDate => self.end_date_input = date_str,
+            _ => {}
+        }
+    }
+
+    pub fn get_time_date(&self) -> time::Date {
+        let year = self.selected_date.year();
+        let month = self.selected_date.month() as u8;
+        let day = self.selected_date.day() as u8;
+
+        time::Date::from_calendar_date(
+            year,
+            Month::try_from(month).unwrap_or(Month::January),
+            day,
+        )
+        .unwrap_or_else(|_| {
+            time::Date::from_calendar_date(2026, Month::January, 1).unwrap()
+        })
     }
 }
