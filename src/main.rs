@@ -17,7 +17,8 @@ use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::adapters::storage::sqlite::SqliteRepository;
-use crate::adapters::tui::app::{App, CurrentScreen, InputFocus};
+use crate::adapters::tui::app::{Action, App, CurrentScreen, InputFocus};
+use crate::adapters::tui::config::Config;
 use crate::adapters::tui::ui::ui;
 use crate::domain::service::TaskService;
 use crate::ports::inbound::TaskServicePort;
@@ -149,8 +150,9 @@ fn run_tui(task_service: Arc<dyn TaskServicePort>) -> io::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    let config = Config::load();
     let mut app = App::new(task_service);
-    let res = run_app(&mut terminal, &mut app);
+    let res = run_app(&mut terminal, &mut app, &config);
 
     disable_raw_mode()?;
     execute!(
@@ -167,7 +169,174 @@ fn run_tui(task_service: Arc<dyn TaskServicePort>) -> io::Result<()> {
     Ok(())
 }
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
+fn handle_action(app: &mut App, action: Action) -> io::Result<bool> {
+    match action {
+        Action::Quit => return Ok(true),
+        Action::Add => {
+            app.current_screen = CurrentScreen::Adding;
+            app.input.clear();
+            app.start_date_input.clear();
+            app.end_date_input.clear();
+            app.input_focus = InputFocus::Content;
+            app.sync_selected_date();
+        }
+        Action::Edit => {
+            let items = app.get_filtered_items();
+            if let Some(i) = app.list_state.selected() {
+                if i < items.len() {
+                    app.current_screen = CurrentScreen::Editing;
+                    app.editing_id = Some(items[i].id.clone());
+                    app.input = items[i].content.clone();
+                    app.start_date_input = items[i]
+                        .start_date
+                        .map(|d| d.format("%Y-%m-%d").to_string())
+                        .unwrap_or_default();
+                    app.end_date_input = items[i]
+                        .end_date
+                        .map(|d| d.format("%Y-%m-%d").to_string())
+                        .unwrap_or_default();
+                    app.input_focus = InputFocus::Content;
+                    app.sync_selected_date();
+                }
+            }
+        }
+        Action::Delete => {
+            if app.list_state.selected().is_some() {
+                app.current_screen = CurrentScreen::ConfirmingDelete;
+            }
+        }
+        Action::ConfirmDelete => {
+            app.remove_selected();
+            app.current_screen = CurrentScreen::Main;
+        }
+        Action::ToggleCompleted => {
+            app.toggle_completed();
+        }
+        Action::ToggleImportant => {
+            app.toggle_important();
+        }
+        Action::ToggleGantt => {
+            if app.current_screen == CurrentScreen::Gantt {
+                app.current_screen = CurrentScreen::Main;
+            } else {
+                app.current_screen = CurrentScreen::Gantt;
+            }
+        }
+        Action::MoveUp => {
+            app.previous();
+        }
+        Action::MoveDown => {
+            app.next();
+        }
+        Action::MoveTaskUp => {
+            app.move_task_up();
+        }
+        Action::MoveTaskDown => {
+            app.move_task_down();
+        }
+        Action::MoveToTop => {
+            app.move_to_top();
+        }
+        Action::MoveToBottom => {
+            app.move_to_bottom();
+        }
+        Action::PageUp => {
+            app.page_up();
+        }
+        Action::PageDown => {
+            app.page_down();
+        }
+        Action::Search => {
+            app.current_screen = CurrentScreen::Searching;
+        }
+        Action::ClearCompleted => {
+            let _ = app.task_service.clear_completed_tasks();
+        }
+        Action::Esc => match app.current_screen {
+            CurrentScreen::Main => app.search_query.clear(),
+            _ => {
+                app.current_screen = CurrentScreen::Main;
+                app.input.clear();
+                app.start_date_input.clear();
+                app.end_date_input.clear();
+                app.editing_id = None;
+                app.input_focus = InputFocus::Content;
+            }
+        },
+        Action::Enter => match app.current_screen {
+            CurrentScreen::Adding => {
+                if !app.input.is_empty() {
+                    let start = app.parse_start_date();
+                    let end = app.parse_end_date();
+                    let _ = app.task_service.add_task(app.input.clone(), start, end);
+                    app.current_screen = CurrentScreen::Main;
+                    app.input.clear();
+                    app.start_date_input.clear();
+                    app.end_date_input.clear();
+                    app.input_focus = InputFocus::Content;
+                }
+            }
+            CurrentScreen::Editing => {
+                if let Some(id) = &app.editing_id {
+                    let start = app.parse_start_date();
+                    let end = app.parse_end_date();
+                    let _ = app.task_service.update_task_content(
+                        id.clone(),
+                        app.input.clone(),
+                        start,
+                        end,
+                    );
+                    app.current_screen = CurrentScreen::Main;
+                    app.input.clear();
+                    app.start_date_input.clear();
+                    app.end_date_input.clear();
+                    app.editing_id = None;
+                    app.input_focus = InputFocus::Content;
+                }
+            }
+            CurrentScreen::Searching | CurrentScreen::ConfirmingDelete => {
+                app.current_screen = CurrentScreen::Main;
+            }
+            _ => app.toggle_completed(),
+        },
+        Action::Tab => {
+            app.next_field();
+        }
+        Action::BackTab => {
+            app.next_field();
+            app.next_field();
+        }
+        Action::MoveDateLeft => {
+            app.move_date_left();
+        }
+        Action::MoveDateRight => {
+            app.move_date_right();
+        }
+        Action::MoveDateUp => {
+            app.move_date_up();
+        }
+        Action::MoveDateDown => {
+            app.move_date_down();
+        }
+        Action::SelectDate => {
+            app.select_date();
+        }
+        Action::Macro(actions) => {
+            for sub_action in actions {
+                if handle_action(app, sub_action)? {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn run_app<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut App,
+    config: &Config,
+) -> io::Result<()> {
     let tick_rate = std::time::Duration::from_millis(50);
     let mut last_tick = std::time::Instant::now();
 
@@ -180,434 +349,129 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
 
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
-                match app.current_screen {
-                    CurrentScreen::Main => match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('c')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            return Ok(())
-                        }
-                        KeyCode::Char('q') => return Ok(()),
-                        KeyCode::Char('a') => {
-                            app.current_screen = CurrentScreen::Adding;
-                            app.input.clear();
-                            app.start_date_input.clear();
-                            app.end_date_input.clear();
-                            app.input_focus = InputFocus::Content;
-                            app.sync_selected_date();
-                        }
-                        KeyCode::Char('e') => {
-                            let items = app.get_filtered_items();
-                            if let Some(i) = app.list_state.selected() {
-                                if i < items.len() {
-                                    app.current_screen = CurrentScreen::Editing;
-                                    app.editing_id = Some(items[i].id.clone());
-                                    app.input = items[i].content.clone();
-                                    app.start_date_input = items[i]
-                                        .start_date
-                                        .map(|d| d.format("%Y-%m-%d").to_string())
-                                        .unwrap_or_default();
-                                    app.end_date_input = items[i]
-                                        .end_date
-                                        .map(|d| d.format("%Y-%m-%d").to_string())
-                                        .unwrap_or_default();
-                                    app.input_focus = InputFocus::Content;
-                                    app.sync_selected_date();
+                // First check if it's a configured action
+                if let Some(action) = config.get_action(&app.current_screen, &key) {
+                    if handle_action(app, action)? {
+                        return Ok(());
+                    }
+                } else {
+                    // Fallback for typing
+                    match app.current_screen {
+                        CurrentScreen::Adding | CurrentScreen::Editing => match key.code {
+                            KeyCode::Char('u')
+                                if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                            {
+                                match app.input_focus {
+                                    InputFocus::Content => app.input.clear(),
+                                    InputFocus::StartDate => app.start_date_input.clear(),
+                                    InputFocus::EndDate => app.end_date_input.clear(),
                                 }
                             }
-                        }
-                        KeyCode::Char('x') => {
-                            if app.list_state.selected().is_some() {
-                                app.current_screen = CurrentScreen::ConfirmingDelete;
-                            }
-                        }
-                        KeyCode::Char('d') => {
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) {
-                                app.page_down();
-                            } else if key.modifiers.contains(event::KeyModifiers::SHIFT) {
-                                app.remove_selected();
-                            } else if app.list_state.selected().is_some() {
-                                app.current_screen = CurrentScreen::ConfirmingDelete;
-                            }
-                        }
-                        KeyCode::Char('l')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            let _ = app.task_service.clear_completed_tasks();
-                        }
-                        KeyCode::Char('/') => {
-                            app.current_screen = CurrentScreen::Searching;
-                        }
-                        KeyCode::Char('c') | KeyCode::Enter => {
-                            app.toggle_completed();
-                        }
-                        KeyCode::Char('i') => {
-                            app.toggle_important();
-                        }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            if key.modifiers.contains(event::KeyModifiers::SHIFT) {
-                                app.move_task_down();
-                            } else {
-                                app.next();
-                            }
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            if key.modifiers.contains(event::KeyModifiers::SHIFT) {
-                                app.move_task_up();
-                            } else {
-                                app.previous();
-                            }
-                        }
-                        KeyCode::Char('g') => {
-                            app.move_to_top();
-                        }
-                        KeyCode::Char('G') => {
-                            app.move_to_bottom();
-                        }
-                        KeyCode::Char('v') => {
-                            app.current_screen = CurrentScreen::Gantt;
-                        }
-                        KeyCode::Char('u')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            app.page_up();
-                        }
-                        KeyCode::Home => app.move_to_top(),
-                        KeyCode::End => app.move_to_bottom(),
-                        KeyCode::PageUp => app.page_up(),
-                        KeyCode::PageDown => app.page_down(),
-                        KeyCode::Esc => {
-                            app.search_query.clear();
-                        }
-                        _ => {}
-                    },
-                    CurrentScreen::Gantt => match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('v') | KeyCode::Esc => {
-                            app.current_screen = CurrentScreen::Main;
-                        }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            app.next();
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            app.previous();
-                        }
-                        _ => {}
-                    },
-                    CurrentScreen::Adding => match key.code {
-                        KeyCode::Tab => {
-                            app.next_field();
-                        }
-                        KeyCode::BackTab => {
-                            app.next_field();
-                            app.next_field();
-                        }
-                        KeyCode::Left if app.input_focus != InputFocus::Content => {
-                            app.move_date_left();
-                        }
-                        KeyCode::Right if app.input_focus != InputFocus::Content => {
-                            app.move_date_right();
-                        }
-                        KeyCode::Up if app.input_focus != InputFocus::Content => {
-                            app.move_date_up();
-                        }
-                        KeyCode::Down if app.input_focus != InputFocus::Content => {
-                            app.move_date_down();
-                        }
-                        KeyCode::Char(' ') if app.input_focus != InputFocus::Content => {
-                            app.select_date();
-                        }
-                        KeyCode::Enter => {
-                            if !app.input.is_empty() {
-                                let start = app.parse_start_date();
-                                let end = app.parse_end_date();
-                                let _ = app.task_service.add_task(app.input.clone(), start, end);
-                                app.current_screen = CurrentScreen::Main;
-                                app.input.clear();
-                                app.start_date_input.clear();
-                                app.end_date_input.clear();
-                                app.input_focus = InputFocus::Content;
-                            }
-                        }
-                        KeyCode::Char('c')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            app.current_screen = CurrentScreen::Main;
-                            app.input.clear();
-                            app.start_date_input.clear();
-                            app.end_date_input.clear();
-                            app.input_focus = InputFocus::Content;
-                        }
-                        KeyCode::Char('u')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            match app.input_focus {
-                                InputFocus::Content => app.input.clear(),
-                                InputFocus::StartDate => app.start_date_input.clear(),
-                                InputFocus::EndDate => app.end_date_input.clear(),
-                            }
-                        }
-                        KeyCode::Char('w')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            let target = match app.input_focus {
-                                InputFocus::Content => &mut app.input,
-                                InputFocus::StartDate => &mut app.start_date_input,
-                                InputFocus::EndDate => &mut app.end_date_input,
-                            };
-                            let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
-                            while let Some(last) = graphemes.last() {
-                                if last.chars().all(|c| c.is_whitespace()) {
-                                    graphemes.pop();
-                                } else {
-                                    break;
+                            KeyCode::Char('w')
+                                if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                            {
+                                let target = match app.input_focus {
+                                    InputFocus::Content => &mut app.input,
+                                    InputFocus::StartDate => &mut app.start_date_input,
+                                    InputFocus::EndDate => &mut app.end_date_input,
+                                };
+                                let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
+                                while let Some(last) = graphemes.last() {
+                                    if last.chars().all(|c| c.is_whitespace()) {
+                                        graphemes.pop();
+                                    } else {
+                                        break;
+                                    }
                                 }
-                            }
-                            while let Some(last) = graphemes.last() {
-                                if !last.chars().all(|c| c.is_whitespace()) {
-                                    graphemes.pop();
-                                } else {
-                                    break;
+                                while let Some(last) = graphemes.last() {
+                                    if !last.chars().all(|c| c.is_whitespace()) {
+                                        graphemes.pop();
+                                    } else {
+                                        break;
+                                    }
                                 }
+                                *target = graphemes.concat();
                             }
-                            *target = graphemes.concat();
-                        }
-                        KeyCode::Char(c) => match app.input_focus {
-                            InputFocus::Content => app.input.push(c),
-                            InputFocus::StartDate => app.start_date_input.push(c),
-                            InputFocus::EndDate => app.end_date_input.push(c),
+                            KeyCode::Char(c) => match app.input_focus {
+                                InputFocus::Content => app.input.push(c),
+                                InputFocus::StartDate => app.start_date_input.push(c),
+                                InputFocus::EndDate => app.end_date_input.push(c),
+                            },
+                            KeyCode::Backspace
+                                if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                            {
+                                let target = match app.input_focus {
+                                    InputFocus::Content => &mut app.input,
+                                    InputFocus::StartDate => &mut app.start_date_input,
+                                    InputFocus::EndDate => &mut app.end_date_input,
+                                };
+                                let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
+                                while let Some(last) = graphemes.last() {
+                                    if last.chars().all(|c| c.is_whitespace()) {
+                                        graphemes.pop();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                while let Some(last) = graphemes.last() {
+                                    if !last.chars().all(|c| c.is_whitespace()) {
+                                        graphemes.pop();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                *target = graphemes.concat();
+                            }
+                            KeyCode::Backspace => {
+                                let target = match app.input_focus {
+                                    InputFocus::Content => &mut app.input,
+                                    InputFocus::StartDate => &mut app.start_date_input,
+                                    InputFocus::EndDate => &mut app.end_date_input,
+                                };
+                                let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
+                                graphemes.pop();
+                                *target = graphemes.concat();
+                            }
+                            _ => {}
                         },
-                        KeyCode::Backspace
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            let target = match app.input_focus {
-                                InputFocus::Content => &mut app.input,
-                                InputFocus::StartDate => &mut app.start_date_input,
-                                InputFocus::EndDate => &mut app.end_date_input,
-                            };
-                            let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
-                            while let Some(last) = graphemes.last() {
-                                if last.chars().all(|c| c.is_whitespace()) {
-                                    graphemes.pop();
-                                } else {
-                                    break;
+                        CurrentScreen::Searching => match key.code {
+                            KeyCode::Char(c) => {
+                                app.search_query.push(c);
+                                app.list_state.select(Some(0));
+                            }
+                            KeyCode::Backspace
+                                if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                            {
+                                let mut graphemes =
+                                    app.search_query.graphemes(true).collect::<Vec<&str>>();
+                                while let Some(last) = graphemes.last() {
+                                    if last.chars().all(|c| c.is_whitespace()) {
+                                        graphemes.pop();
+                                    } else {
+                                        break;
+                                    }
                                 }
-                            }
-                            while let Some(last) = graphemes.last() {
-                                if !last.chars().all(|c| c.is_whitespace()) {
-                                    graphemes.pop();
-                                } else {
-                                    break;
+                                while let Some(last) = graphemes.last() {
+                                    if !last.chars().all(|c| c.is_whitespace()) {
+                                        graphemes.pop();
+                                    } else {
+                                        break;
+                                    }
                                 }
+                                app.search_query = graphemes.concat();
+                                app.list_state.select(Some(0));
                             }
-                            *target = graphemes.concat();
-                        }
-                        KeyCode::Backspace => {
-                            let target = match app.input_focus {
-                                InputFocus::Content => &mut app.input,
-                                InputFocus::StartDate => &mut app.start_date_input,
-                                InputFocus::EndDate => &mut app.end_date_input,
-                            };
-                            let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
-                            graphemes.pop();
-                            *target = graphemes.concat();
-                        }
-                        KeyCode::Esc => {
-                            app.current_screen = CurrentScreen::Main;
-                            app.input.clear();
-                            app.start_date_input.clear();
-                            app.end_date_input.clear();
-                            app.input_focus = InputFocus::Content;
-                        }
-                        _ => {}
-                    },
-                    CurrentScreen::Editing => match key.code {
-                        KeyCode::Tab => {
-                            app.next_field();
-                        }
-                        KeyCode::BackTab => {
-                            app.next_field();
-                            app.next_field();
-                        }
-                        KeyCode::Left if app.input_focus != InputFocus::Content => {
-                            app.move_date_left();
-                        }
-                        KeyCode::Right if app.input_focus != InputFocus::Content => {
-                            app.move_date_right();
-                        }
-                        KeyCode::Up if app.input_focus != InputFocus::Content => {
-                            app.move_date_up();
-                        }
-                        KeyCode::Down if app.input_focus != InputFocus::Content => {
-                            app.move_date_down();
-                        }
-                        KeyCode::Char(' ') if app.input_focus != InputFocus::Content => {
-                            app.select_date();
-                        }
-                        KeyCode::Enter => {
-                            if let Some(id) = &app.editing_id {
-                                let start = app.parse_start_date();
-                                let end = app.parse_end_date();
-                                let _ = app.task_service.update_task_content(
-                                    id.clone(),
-                                    app.input.clone(),
-                                    start,
-                                    end,
-                                );
-                                app.current_screen = CurrentScreen::Main;
-                                app.input.clear();
-                                app.start_date_input.clear();
-                                app.end_date_input.clear();
-                                app.editing_id = None;
-                                app.input_focus = InputFocus::Content;
+                            KeyCode::Backspace => {
+                                let mut graphemes =
+                                    app.search_query.graphemes(true).collect::<Vec<&str>>();
+                                graphemes.pop();
+                                app.search_query = graphemes.concat();
+                                app.list_state.select(Some(0));
                             }
-                        }
-                        KeyCode::Char('c')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            app.current_screen = CurrentScreen::Main;
-                            app.input.clear();
-                            app.start_date_input.clear();
-                            app.end_date_input.clear();
-                            app.editing_id = None;
-                            app.input_focus = InputFocus::Content;
-                        }
-                        KeyCode::Char('u')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            match app.input_focus {
-                                InputFocus::Content => app.input.clear(),
-                                InputFocus::StartDate => app.start_date_input.clear(),
-                                InputFocus::EndDate => app.end_date_input.clear(),
-                            }
-                        }
-                        KeyCode::Char('w')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            let target = match app.input_focus {
-                                InputFocus::Content => &mut app.input,
-                                InputFocus::StartDate => &mut app.start_date_input,
-                                InputFocus::EndDate => &mut app.end_date_input,
-                            };
-                            let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
-                            while let Some(last) = graphemes.last() {
-                                if last.chars().all(|c| c.is_whitespace()) {
-                                    graphemes.pop();
-                                } else {
-                                    break;
-                                }
-                            }
-                            while let Some(last) = graphemes.last() {
-                                if !last.chars().all(|c| c.is_whitespace()) {
-                                    graphemes.pop();
-                                } else {
-                                    break;
-                                }
-                            }
-                            *target = graphemes.concat();
-                        }
-                        KeyCode::Char(c) => match app.input_focus {
-                            InputFocus::Content => app.input.push(c),
-                            InputFocus::StartDate => app.start_date_input.push(c),
-                            InputFocus::EndDate => app.end_date_input.push(c),
+                            _ => {}
                         },
-                        KeyCode::Backspace
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            let target = match app.input_focus {
-                                InputFocus::Content => &mut app.input,
-                                InputFocus::StartDate => &mut app.start_date_input,
-                                InputFocus::EndDate => &mut app.end_date_input,
-                            };
-                            let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
-                            while let Some(last) = graphemes.last() {
-                                if last.chars().all(|c| c.is_whitespace()) {
-                                    graphemes.pop();
-                                } else {
-                                    break;
-                                }
-                            }
-                            while let Some(last) = graphemes.last() {
-                                if !last.chars().all(|c| c.is_whitespace()) {
-                                    graphemes.pop();
-                                } else {
-                                    break;
-                                }
-                            }
-                            *target = graphemes.concat();
-                        }
-                        KeyCode::Backspace => {
-                            let target = match app.input_focus {
-                                InputFocus::Content => &mut app.input,
-                                InputFocus::StartDate => &mut app.start_date_input,
-                                InputFocus::EndDate => &mut app.end_date_input,
-                            };
-                            let mut graphemes = target.graphemes(true).collect::<Vec<&str>>();
-                            graphemes.pop();
-                            *target = graphemes.concat();
-                        }
-                        KeyCode::Esc => {
-                            app.current_screen = CurrentScreen::Main;
-                            app.input.clear();
-                            app.start_date_input.clear();
-                            app.end_date_input.clear();
-                            app.editing_id = None;
-                            app.input_focus = InputFocus::Content;
-                        }
                         _ => {}
-                    },
-                    CurrentScreen::Searching => match key.code {
-                        KeyCode::Enter | KeyCode::Esc => {
-                            app.current_screen = CurrentScreen::Main;
-                        }
-                        KeyCode::Char(c) => {
-                            app.search_query.push(c);
-                            app.list_state.select(Some(0));
-                        }
-                        KeyCode::Backspace
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            let mut graphemes =
-                                app.search_query.graphemes(true).collect::<Vec<&str>>();
-                            while let Some(last) = graphemes.last() {
-                                if last.chars().all(|c| c.is_whitespace()) {
-                                    graphemes.pop();
-                                } else {
-                                    break;
-                                }
-                            }
-                            while let Some(last) = graphemes.last() {
-                                if !last.chars().all(|c| c.is_whitespace()) {
-                                    graphemes.pop();
-                                } else {
-                                    break;
-                                }
-                            }
-                            app.search_query = graphemes.concat();
-                            app.list_state.select(Some(0));
-                        }
-                        KeyCode::Backspace => {
-                            let mut graphemes =
-                                app.search_query.graphemes(true).collect::<Vec<&str>>();
-                            graphemes.pop();
-                            app.search_query = graphemes.concat();
-                            app.list_state.select(Some(0));
-                        }
-                        _ => {}
-                    },
-                    CurrentScreen::ConfirmingDelete => match key.code {
-                        KeyCode::Char('y') | KeyCode::Enter => {
-                            app.remove_selected();
-                            app.current_screen = CurrentScreen::Main;
-                        }
-                        KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('c')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            app.current_screen = CurrentScreen::Main;
-                        }
-                        _ => {
-                            app.current_screen = CurrentScreen::Main;
-                        }
-                    },
+                    }
                 }
             }
         }

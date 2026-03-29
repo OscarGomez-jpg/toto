@@ -5,7 +5,7 @@ use ratatui::widgets::ListState;
 use std::sync::Arc;
 use time::Month;
 
-#[derive(PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum CurrentScreen {
     Main,
     Adding,
@@ -20,6 +20,38 @@ pub enum InputFocus {
     Content,
     StartDate,
     EndDate,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum Action {
+    Quit,
+    Add,
+    Edit,
+    Delete,
+    ConfirmDelete,
+    ToggleCompleted,
+    ToggleImportant,
+    ToggleGantt,
+    MoveUp,
+    MoveDown,
+    MoveTaskUp,
+    MoveTaskDown,
+    MoveToTop,
+    MoveToBottom,
+    PageUp,
+    PageDown,
+    Search,
+    ClearCompleted,
+    Esc,
+    Enter,
+    Tab,
+    BackTab,
+    MoveDateLeft,
+    MoveDateRight,
+    MoveDateUp,
+    MoveDateDown,
+    SelectDate,
+    Macro(Vec<Action>),
 }
 
 pub struct App {
