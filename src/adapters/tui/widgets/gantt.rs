@@ -21,7 +21,9 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
             .borders(Borders::ALL)
             .title(" Gantt Chart ")
             .border_style(Style::default().fg(colors.dim_text));
-        let message = Line::from("No tasks with dates found. Add tasks with start/end dates to see them here.");
+        let message = Line::from(
+            "No tasks with dates found. Add tasks with start/end dates to see them here.",
+        );
         f.render_widget(List::new(vec![ListItem::new(message)]).block(block), area);
         return;
     }
@@ -32,7 +34,7 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
         .filter_map(|t| t.start_date.or(t.end_date))
         .min()
         .unwrap_or_else(Utc::now);
-    
+
     let mut max_date = tasks_with_dates
         .iter()
         .filter_map(|t| t.end_date.or(t.start_date))
@@ -50,20 +52,20 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
     }
 
     let total_days = (max_date - min_date).num_days().max(1);
-    
+
     // Width for task labels
     let label_width = 25;
     let chart_width = area.width.saturating_sub(label_width as u16 + 10);
-    
+
     if chart_width < 5 {
-         // Not enough space for the chart
-         let block = Block::default()
+        // Not enough space for the chart
+        let block = Block::default()
             .borders(Borders::ALL)
             .title(" Gantt Chart ")
             .border_style(Style::default().fg(colors.dim_text));
         let message = Line::from("Not enough horizontal space to render Gantt chart.");
         f.render_widget(List::new(vec![ListItem::new(message)]).block(block), area);
-         return;
+        return;
     }
 
     let mut items: Vec<ListItem> = Vec::new();
@@ -72,7 +74,9 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
     let mut timeline_spans = vec![
         Span::styled(
             format!("{: <width$}", "Timeline", width = label_width),
-            Style::default().fg(colors.dim_text).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(colors.dim_text)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" │ "),
     ];
@@ -82,10 +86,11 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
     if num_markers > 0 {
         let mut last_pos = 0;
         for i in 0..num_markers {
-            let day_offset = (i as f64 * total_days as f64 / (num_markers - 1).max(1) as f64) as i64;
+            let day_offset =
+                (i as f64 * total_days as f64 / (num_markers - 1).max(1) as f64) as i64;
             let date = min_date + Duration::days(day_offset);
             let pos = (day_offset as f64 / total_days as f64 * chart_width as f64) as u16;
-            
+
             let date_str = date.format("%m-%d").to_string();
             let padding = pos.saturating_sub(last_pos).saturating_sub(1);
             for _ in 0..padding {
@@ -110,7 +115,11 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
         }
         let label_span = Span::styled(
             format!("{: <width$}", label, width = label_width),
-            Style::default().fg(if item.completed { colors.dim_text } else { colors.primary_text }),
+            Style::default().fg(if item.completed {
+                colors.dim_text
+            } else {
+                colors.primary_text
+            }),
         );
 
         let mut spans = vec![label_span, Span::raw(" │ ")];
@@ -119,21 +128,32 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
             (Some(start), Some(end)) => {
                 let start_offset = (start - min_date).num_days().max(0);
                 let duration = (end - start).num_days().max(1);
-                
-                let start_pos = (start_offset as f64 / total_days as f64 * chart_width as f64) as u16;
+
+                let start_pos =
+                    (start_offset as f64 / total_days as f64 * chart_width as f64) as u16;
                 let bar_width = (duration as f64 / total_days as f64 * chart_width as f64) as u16;
                 let bar_width = bar_width.max(1);
 
                 for _ in 0..start_pos {
                     spans.push(Span::raw(" "));
                 }
-                
-                let bar_color = if item.completed { colors.dim_text } else if item.important { colors.alert } else { colors.accent };
-                spans.push(Span::styled("█".repeat(bar_width as usize), Style::default().fg(bar_color)));
+
+                let bar_color = if item.completed {
+                    colors.dim_text
+                } else if item.important {
+                    colors.alert
+                } else {
+                    colors.accent
+                };
+                spans.push(Span::styled(
+                    "█".repeat(bar_width as usize),
+                    Style::default().fg(bar_color),
+                ));
             }
             (Some(start), None) => {
                 let start_offset = (start - min_date).num_days().max(0);
-                let start_pos = (start_offset as f64 / total_days as f64 * chart_width as f64) as u16;
+                let start_pos =
+                    (start_offset as f64 / total_days as f64 * chart_width as f64) as u16;
                 for _ in 0..start_pos {
                     spans.push(Span::raw(" "));
                 }
@@ -143,7 +163,10 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
             (None, Some(end)) => {
                 let end_offset = (end - min_date).num_days().max(0);
                 let end_pos = (end_offset as f64 / total_days as f64 * chart_width as f64) as u16;
-                spans.push(Span::styled("┄".repeat(end_pos as usize), Style::default().fg(colors.dim_text)));
+                spans.push(Span::styled(
+                    "┄".repeat(end_pos as usize),
+                    Style::default().fg(colors.dim_text),
+                ));
                 spans.push(Span::styled("◀", Style::default().fg(colors.accent)));
             }
             _ => {
@@ -158,7 +181,11 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!(" Gantt Chart: {} to {} ", min_date.format("%Y-%m-%d"), max_date.format("%Y-%m-%d")))
+                .title(format!(
+                    " Gantt Chart: {} to {} ",
+                    min_date.format("%Y-%m-%d"),
+                    max_date.format("%Y-%m-%d")
+                ))
                 .border_style(Style::default().fg(colors.dim_text)),
         )
         .highlight_style(

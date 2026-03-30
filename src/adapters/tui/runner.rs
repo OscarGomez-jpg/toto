@@ -7,6 +7,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use log::{debug, error, info};
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     Terminal,
@@ -14,7 +15,6 @@ use ratatui::{
 use std::io;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
-use log::{info, error, debug};
 
 pub fn run_tui(task_service: Arc<dyn TaskServicePort>) -> io::Result<()> {
     info!("Initializing TUI...");
@@ -138,7 +138,11 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
             app.current_screen = CurrentScreen::Searching;
         }
         Action::SyncJira => {
-            if !config.jira.enabled || config.jira.domain.is_empty() || config.jira.email.is_empty() || config.jira.api_token.is_empty() {
+            if !config.jira.enabled
+                || config.jira.domain.is_empty()
+                || config.jira.email.is_empty()
+                || config.jira.api_token.is_empty()
+            {
                 info!("Triggering Jira configuration screen");
                 app.current_screen = CurrentScreen::JiraConfiguring;
                 app.jira_domain_input = config.jira.domain.clone();
@@ -239,7 +243,11 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
                     app.input_focus = InputFocus::Content;
                 }
             }
-            CurrentScreen::Main | CurrentScreen::Searching | CurrentScreen::ConfirmingDelete | CurrentScreen::Gantt | CurrentScreen::Help => {
+            CurrentScreen::Main
+            | CurrentScreen::Searching
+            | CurrentScreen::ConfirmingDelete
+            | CurrentScreen::Gantt
+            | CurrentScreen::Help => {
                 app.toggle_completed();
             }
         },
@@ -296,7 +304,7 @@ fn run_app<B: Backend>(
                 let is_typing_focus = (app.current_screen == CurrentScreen::Adding
                     || app.current_screen == CurrentScreen::Editing
                     || app.current_screen == CurrentScreen::JiraConfiguring)
-                    && (app.input_focus == InputFocus::Content 
+                    && (app.input_focus == InputFocus::Content
                         || app.input_focus == InputFocus::JiraDomain
                         || app.input_focus == InputFocus::JiraEmail
                         || app.input_focus == InputFocus::JiraToken
@@ -340,63 +348,124 @@ fn run_app<B: Backend>(
                     }
                 } else {
                     match app.current_screen {
-                        CurrentScreen::Adding | CurrentScreen::Editing | CurrentScreen::JiraConfiguring => match app.input_focus {
+                        CurrentScreen::Adding
+                        | CurrentScreen::Editing
+                        | CurrentScreen::JiraConfiguring => match app.input_focus {
                             InputFocus::Content => match key.code {
-                                KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => app.input.clear(),
-                                KeyCode::Char('w') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                                    let mut graphemes = app.input.graphemes(true).collect::<Vec<&str>>();
+                                KeyCode::Char('u')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    app.input.clear()
+                                }
+                                KeyCode::Char('w')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    let mut graphemes =
+                                        app.input.graphemes(true).collect::<Vec<&str>>();
                                     while let Some(last) = graphemes.last() {
-                                        if last.chars().all(|c| c.is_whitespace()) { graphemes.pop(); } else { break; }
+                                        if last.chars().all(|c| c.is_whitespace()) {
+                                            graphemes.pop();
+                                        } else {
+                                            break;
+                                        }
                                     }
                                     while let Some(last) = graphemes.last() {
-                                        if !last.chars().all(|c| c.is_whitespace()) { graphemes.pop(); } else { break; }
+                                        if !last.chars().all(|c| c.is_whitespace()) {
+                                            graphemes.pop();
+                                        } else {
+                                            break;
+                                        }
                                     }
                                     app.input = graphemes.concat();
                                 }
                                 KeyCode::Char(c) => app.input.push(c),
-                                KeyCode::Backspace => { app.input.pop(); }
+                                KeyCode::Backspace => {
+                                    app.input.pop();
+                                }
                                 _ => {}
                             },
                             InputFocus::StartDate => match key.code {
-                                KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => app.start_date_input.clear(),
+                                KeyCode::Char('u')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    app.start_date_input.clear()
+                                }
                                 KeyCode::Char(c) => app.start_date_input.push(c),
-                                KeyCode::Backspace => { app.start_date_input.pop(); }
+                                KeyCode::Backspace => {
+                                    app.start_date_input.pop();
+                                }
                                 _ => {}
                             },
                             InputFocus::EndDate => match key.code {
-                                KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => app.end_date_input.clear(),
+                                KeyCode::Char('u')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    app.end_date_input.clear()
+                                }
                                 KeyCode::Char(c) => app.end_date_input.push(c),
-                                KeyCode::Backspace => { app.end_date_input.pop(); }
+                                KeyCode::Backspace => {
+                                    app.end_date_input.pop();
+                                }
                                 _ => {}
                             },
                             InputFocus::JiraDomain => match key.code {
-                                KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => app.jira_domain_input.clear(),
+                                KeyCode::Char('u')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    app.jira_domain_input.clear()
+                                }
                                 KeyCode::Char(c) => app.jira_domain_input.push(c),
-                                KeyCode::Backspace => { app.jira_domain_input.pop(); }
+                                KeyCode::Backspace => {
+                                    app.jira_domain_input.pop();
+                                }
                                 _ => {}
                             },
                             InputFocus::JiraEmail => match key.code {
-                                KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => app.jira_email_input.clear(),
+                                KeyCode::Char('u')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    app.jira_email_input.clear()
+                                }
                                 KeyCode::Char(c) => app.jira_email_input.push(c),
-                                KeyCode::Backspace => { app.jira_email_input.pop(); }
+                                KeyCode::Backspace => {
+                                    app.jira_email_input.pop();
+                                }
                                 _ => {}
                             },
                             InputFocus::JiraToken => match key.code {
-                                KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => app.jira_api_token_input.clear(),
+                                KeyCode::Char('u')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    app.jira_api_token_input.clear()
+                                }
                                 KeyCode::Char(c) => app.jira_api_token_input.push(c),
-                                KeyCode::Backspace => { app.jira_api_token_input.pop(); }
+                                KeyCode::Backspace => {
+                                    app.jira_api_token_input.pop();
+                                }
                                 _ => {}
                             },
                             InputFocus::JiraProjects => match key.code {
-                                KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => app.jira_projects_input.clear(),
+                                KeyCode::Char('u')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    app.jira_projects_input.clear()
+                                }
                                 KeyCode::Char(c) => app.jira_projects_input.push(c),
-                                KeyCode::Backspace => { app.jira_projects_input.pop(); }
+                                KeyCode::Backspace => {
+                                    app.jira_projects_input.pop();
+                                }
                                 _ => {}
                             },
                             InputFocus::JiraLabels => match key.code {
-                                KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => app.jira_labels_input.clear(),
+                                KeyCode::Char('u')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    app.jira_labels_input.clear()
+                                }
                                 KeyCode::Char(c) => app.jira_labels_input.push(c),
-                                KeyCode::Backspace => { app.jira_labels_input.pop(); }
+                                KeyCode::Backspace => {
+                                    app.jira_labels_input.pop();
+                                }
                                 _ => {}
                             },
                         },

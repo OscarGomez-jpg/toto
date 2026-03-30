@@ -66,8 +66,7 @@ mod tests {
     #[test]
     fn test_ui_main_screen_snapshot() {
         let mut mock_service = MockTaskServicePort::new();
-        mock_service.expect_get_all_tasks()
-            .returning(|| Ok(vec![]));
+        mock_service.expect_get_all_tasks().returning(|| Ok(vec![]));
 
         let mut app = App::new(Arc::new(mock_service));
         let backend = TestBackend::new(100, 30);
@@ -107,8 +106,7 @@ mod tests {
     #[test]
     fn test_ui_gantt_screen_snapshot() {
         let mut mock_service = MockTaskServicePort::new();
-        mock_service.expect_get_all_tasks()
-            .returning(|| Ok(vec![]));
+        mock_service.expect_get_all_tasks().returning(|| Ok(vec![]));
 
         let mut app = App::new(Arc::new(mock_service));
         app.current_screen = CurrentScreen::Gantt;
@@ -124,8 +122,7 @@ mod tests {
     #[test]
     fn test_ui_help_screen_snapshot() {
         let mut mock_service = MockTaskServicePort::new();
-        mock_service.expect_get_all_tasks()
-            .returning(|| Ok(vec![]));
+        mock_service.expect_get_all_tasks().returning(|| Ok(vec![]));
 
         let mut app = App::new(Arc::new(mock_service));
         app.current_screen = CurrentScreen::Help;
@@ -141,8 +138,7 @@ mod tests {
     #[test]
     fn test_ui_jira_config_screen_snapshot() {
         let mut mock_service = MockTaskServicePort::new();
-        mock_service.expect_get_all_tasks()
-            .returning(|| Ok(vec![]));
+        mock_service.expect_get_all_tasks().returning(|| Ok(vec![]));
 
         let mut app = App::new(Arc::new(mock_service));
         app.current_screen = CurrentScreen::JiraConfiguring;
@@ -154,4 +150,4 @@ mod tests {
         let view = format!("{:?}", terminal.backend());
         insta::assert_snapshot!(scrub_ui_view(&view));
     }
-    }
+}
