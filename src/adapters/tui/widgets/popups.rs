@@ -1,11 +1,11 @@
 use crate::adapters::tui::app::{App, CurrentScreen, InputFocus};
 use crate::adapters::tui::widgets::colors::Colors;
 use crate::adapters::tui::widgets::utils::{centered_rect, centered_rect_fixed};
-use ratatui::style::Stylize;
+use ratatui::style::{Modifier, Style, Stylize};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::calendar::{CalendarEventStore, Monthly};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::Style,
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
@@ -16,13 +16,71 @@ pub fn draw_popups(f: &mut Frame, app: &mut App, colors: &Colors) {
         CurrentScreen::Adding | CurrentScreen::Editing => draw_input_popup(f, app, colors),
         CurrentScreen::ConfirmingDelete => draw_delete_popup(f, app, colors),
         CurrentScreen::JiraConfiguring => draw_jira_config_popup(f, app, colors),
+        CurrentScreen::Help => draw_help_popup(f, app, colors),
         _ => {}
     }
 }
 
+fn draw_help_popup(f: &mut Frame, _app: &mut App, colors: &Colors) {
+    let popup_width = 60;
+    let popup_height = 22;
+    let area = centered_rect_fixed(popup_width, popup_height, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(colors.accent))
+        .bg(colors.card_bg)
+        .title(" Keyboard Shortcuts ");
+    f.render_widget(block, area);
+
+    let help_text = vec![
+        Line::from(vec![Span::styled(
+            " General ",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(colors.accent),
+        )]),
+        Line::from(" q / Esc      : Back / Quit"),
+        Line::from(" h            : Toggle Help"),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " Main Screen ",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(colors.accent),
+        )]),
+        Line::from(" a / e        : Add / Edit Task"),
+        Line::from(" x / d        : Delete Task"),
+        Line::from(" c / Enter    : Toggle Completed"),
+        Line::from(" i            : Toggle Important"),
+        Line::from(" v            : Toggle Gantt View"),
+        Line::from(" j / k / Arrows: Move Selection"),
+        Line::from(" S-j / S-k    : Move Task Up/Down"),
+        Line::from(" g / G        : Top / Bottom"),
+        Line::from(" /            : Search"),
+        Line::from(" ^s           : Sync Jira"),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " Calendar (in Add/Edit) ",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(colors.accent),
+        )]),
+        Line::from(" Arrows       : Navigate Dates"),
+        Line::from(" Space        : Select Date"),
+        Line::from(" Tab          : Next Field"),
+    ];
+
+    let help_paragraph = Paragraph::new(help_text)
+        .block(Block::default().padding(ratatui::widgets::Padding::uniform(1)))
+        .alignment(Alignment::Left);
+    f.render_widget(help_paragraph, area);
+}
+
 fn draw_jira_config_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
     let popup_width = (f.area().width as f32 * 0.8).max(50.0).min(100.0) as u16;
-    let popup_height = 18;
+    let popup_height = 21;
     let area = centered_rect_fixed(popup_width, popup_height, f.area());
     f.render_widget(Clear, area);
 
@@ -41,6 +99,7 @@ fn draw_jira_config_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
             Constraint::Length(3), // Email
             Constraint::Length(3), // Token
             Constraint::Length(3), // Projects
+            Constraint::Length(3), // Labels
             Constraint::Length(1), // Help
         ])
         .split(area);
@@ -54,7 +113,10 @@ fn draw_jira_config_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
         } else {
             Style::default().fg(colors.dim_text)
         });
-    f.render_widget(Paragraph::new(app.jira_domain_input.as_str()).block(domain_block), chunks[0]);
+    f.render_widget(
+        Paragraph::new(app.jira_domain_input.as_str()).block(domain_block),
+        chunks[0],
+    );
 
     // Email
     let email_block = Block::default()
@@ -65,7 +127,10 @@ fn draw_jira_config_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
         } else {
             Style::default().fg(colors.dim_text)
         });
-    f.render_widget(Paragraph::new(app.jira_email_input.as_str()).block(email_block), chunks[1]);
+    f.render_widget(
+        Paragraph::new(app.jira_email_input.as_str()).block(email_block),
+        chunks[1],
+    );
 
     // Token
     let token_block = Block::default()
@@ -88,13 +153,30 @@ fn draw_jira_config_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
         } else {
             Style::default().fg(colors.dim_text)
         });
-    f.render_widget(Paragraph::new(app.jira_projects_input.as_str()).block(projects_block), chunks[3]);
+    f.render_widget(
+        Paragraph::new(app.jira_projects_input.as_str()).block(projects_block),
+        chunks[3],
+    );
+
+    // Labels
+    let labels_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Labels (comma separated, e.g. urgent, v1) ")
+        .border_style(if app.input_focus == InputFocus::JiraLabels {
+            Style::default().fg(colors.accent)
+        } else {
+            Style::default().fg(colors.dim_text)
+        });
+    f.render_widget(
+        Paragraph::new(app.jira_labels_input.as_str()).block(labels_block),
+        chunks[4],
+    );
 
     f.render_widget(
         Paragraph::new("Tab: Next | Enter: Save & Connect | Esc: Cancel")
             .style(Style::default().fg(colors.dim_text))
             .alignment(Alignment::Center),
-        chunks[4],
+        chunks[5],
     );
 
     // Set cursor
@@ -103,6 +185,7 @@ fn draw_jira_config_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
         InputFocus::JiraEmail => Some((chunks[1], &app.jira_email_input)),
         InputFocus::JiraToken => Some((chunks[2], &app.jira_api_token_input)),
         InputFocus::JiraProjects => Some((chunks[3], &app.jira_projects_input)),
+        InputFocus::JiraLabels => Some((chunks[4], &app.jira_labels_input)),
         _ => None,
     };
 

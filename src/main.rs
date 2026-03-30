@@ -3,6 +3,10 @@ mod domain;
 mod ports;
 
 use clap::{arg, command};
+use directories::ProjectDirs;
+use log::{info, LevelFilter};
+use simplelog::{Config as LogConfig, WriteLogger};
+use std::fs::File;
 use std::sync::Arc;
 
 use crate::adapters::storage::sqlite::SqliteRepository;
@@ -10,7 +14,21 @@ use crate::adapters::tui::runner::run_tui;
 use crate::domain::service::TaskService;
 use crate::ports::inbound::TaskServicePort;
 
+fn init_logger() -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(proj_dirs) = ProjectDirs::from("", "", "toto") {
+        let data_dir = proj_dirs.data_dir();
+        std::fs::create_dir_all(data_dir)?;
+        let log_path = data_dir.join("toto.log");
+        let file = File::create(log_path)?;
+        WriteLogger::init(LevelFilter::Info, LogConfig::default(), file)?;
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _ = init_logger();
+    info!("Starting toto...");
+
     let matches = command!()
         .arg(arg!(-a --add <CONTENT> "Add a new todo").required(false))
         .arg(arg!(-l --list [LIMIT] "List todos").required(false))
@@ -22,6 +40,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .arg(arg!(--end <DATE> "End date (YYYY-MM-DD)").required(false))
         .arg(
             arg!(--clear "Clear all completed todos")
+                .required(false)
+                .num_args(0),
+        )
+        .arg(
+            arg!(--"reset-config" "Reset configuration to defaults")
                 .required(false)
                 .num_args(0),
         )
@@ -97,6 +120,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if matches.get_flag("clear") {
         let msg = task_service.clear_completed_tasks()?;
         println!("{}", msg);
+        performed_action = true;
+    }
+
+    if matches.get_flag("reset-config") {
+        let config = crate::adapters::tui::config::Config::default();
+        config.save()?;
+        println!("Configuration reset to defaults.");
         performed_action = true;
     }
 

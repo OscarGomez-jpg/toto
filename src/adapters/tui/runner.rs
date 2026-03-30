@@ -14,8 +14,10 @@ use ratatui::{
 use std::io;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
+use log::{info, error, debug};
 
 pub fn run_tui(task_service: Arc<dyn TaskServicePort>) -> io::Result<()> {
+    info!("Initializing TUI...");
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -34,16 +36,22 @@ pub fn run_tui(task_service: Arc<dyn TaskServicePort>) -> io::Result<()> {
     )?;
     terminal.show_cursor()?;
 
-    if let Err(err) = res {
+    if let Err(ref err) = res {
+        error!("TUI run_app error: {:?}", err);
         println!("{:?}", err)
     }
 
+    info!("TUI session ended.");
     Ok(())
 }
 
 fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<bool> {
+    debug!("Handling action: {:?}", action);
     match action {
-        Action::Quit => return Ok(true),
+        Action::Quit => {
+            info!("User requested quit.");
+            return Ok(true);
+        }
         Action::Add => {
             app.current_screen = CurrentScreen::Adding;
             app.input.clear();
@@ -78,6 +86,7 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
             }
         }
         Action::ConfirmDelete => {
+            info!("User confirmed deletion of task.");
             app.remove_selected();
             app.current_screen = CurrentScreen::Main;
         }
@@ -92,6 +101,13 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
                 app.current_screen = CurrentScreen::Main;
             } else {
                 app.current_screen = CurrentScreen::Gantt;
+            }
+        }
+        Action::ToggleHelp => {
+            if app.current_screen == CurrentScreen::Help {
+                app.current_screen = CurrentScreen::Main;
+            } else {
+                app.current_screen = CurrentScreen::Help;
             }
         }
         Action::MoveUp => {
@@ -123,22 +139,28 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
         }
         Action::SyncJira => {
             if !config.jira.enabled || config.jira.domain.is_empty() || config.jira.email.is_empty() || config.jira.api_token.is_empty() {
+                info!("Triggering Jira configuration screen");
                 app.current_screen = CurrentScreen::JiraConfiguring;
                 app.jira_domain_input = config.jira.domain.clone();
                 app.jira_email_input = config.jira.email.clone();
                 app.jira_api_token_input = config.jira.api_token.clone();
                 app.jira_projects_input = config.jira.projects.join(", ");
+                app.jira_labels_input = config.jira.labels.join(", ");
                 app.input_focus = InputFocus::JiraDomain;
             } else {
-                let _ = app.task_service.sync_jira(config.jira.clone());
+                info!("Initiating Jira synchronization");
+                if let Err(e) = app.task_service.sync_jira(config.jira.clone()) {
+                    error!("Jira sync failed: {:?}", e);
+                }
             }
         }
         Action::ClearCompleted => {
+            info!("Clearing completed tasks.");
             let _ = app.task_service.clear_completed_tasks();
         }
         Action::Esc => match app.current_screen {
             CurrentScreen::Main => app.search_query.clear(),
-            CurrentScreen::JiraConfiguring => {
+            CurrentScreen::JiraConfiguring | CurrentScreen::Help => {
                 app.current_screen = CurrentScreen::Main;
             }
             _ => {
@@ -152,6 +174,7 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
         },
         Action::Enter => match app.current_screen {
             CurrentScreen::JiraConfiguring => {
+                info!("Saving Jira configuration and syncing");
                 let mut new_config = config.clone();
                 new_config.jira.enabled = true;
                 new_config.jira.domain = app.jira_domain_input.clone();
@@ -163,17 +186,31 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
+                new_config.jira.labels = app
+                    .jira_labels_input
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
 
                 if let Ok(_) = new_config.save() {
-                    let _ = app.task_service.sync_jira(new_config.jira.clone());
+                    info!("Jira configuration saved successfully");
+                    if let Err(e) = app.task_service.sync_jira(new_config.jira.clone()) {
+                        error!("Jira sync failed after save: {:?}", e);
+                    }
                     app.current_screen = CurrentScreen::Main;
+                } else {
+                    error!("Failed to save Jira configuration");
                 }
             }
             CurrentScreen::Adding => {
                 if !app.input.is_empty() {
+                    info!("Adding new task: {}", app.input);
                     let start = app.parse_start_date();
                     let end = app.parse_end_date();
-                    let _ = app.task_service.add_task(app.input.clone(), start, end);
+                    if let Err(e) = app.task_service.add_task(app.input.clone(), start, end) {
+                        error!("Failed to add task: {:?}", e);
+                    }
                     app.current_screen = CurrentScreen::Main;
                     app.input.clear();
                     app.start_date_input.clear();
@@ -183,14 +220,17 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
             }
             CurrentScreen::Editing => {
                 if let Some(id) = &app.editing_id {
+                    info!("Updating task: {}", id);
                     let start = app.parse_start_date();
                     let end = app.parse_end_date();
-                    let _ = app.task_service.update_task_content(
+                    if let Err(e) = app.task_service.update_task_content(
                         id.clone(),
                         app.input.clone(),
                         start,
                         end,
-                    );
+                    ) {
+                        error!("Failed to update task: {:?}", e);
+                    }
                     app.current_screen = CurrentScreen::Main;
                     app.input.clear();
                     app.start_date_input.clear();
@@ -199,7 +239,7 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
                     app.input_focus = InputFocus::Content;
                 }
             }
-            CurrentScreen::Main | CurrentScreen::Searching | CurrentScreen::ConfirmingDelete | CurrentScreen::Gantt => {
+            CurrentScreen::Main | CurrentScreen::Searching | CurrentScreen::ConfirmingDelete | CurrentScreen::Gantt | CurrentScreen::Help => {
                 app.toggle_completed();
             }
         },
@@ -260,9 +300,22 @@ fn run_app<B: Backend>(
                         || app.input_focus == InputFocus::JiraDomain
                         || app.input_focus == InputFocus::JiraEmail
                         || app.input_focus == InputFocus::JiraToken
-                        || app.input_focus == InputFocus::JiraProjects);
+                        || app.input_focus == InputFocus::JiraProjects
+                        || app.input_focus == InputFocus::JiraLabels);
 
                 let mut action = config.get_action(&app.current_screen, &key);
+
+                // Hardcoded fallback for navigation keys in case config is old/missing them
+                if action.is_none() {
+                    match key.code {
+                        KeyCode::Char('h') if !is_typing_focus => action = Some(Action::ToggleHelp),
+                        KeyCode::Tab => action = Some(Action::Tab),
+                        KeyCode::BackTab => action = Some(Action::BackTab),
+                        KeyCode::Enter => action = Some(Action::Enter),
+                        KeyCode::Esc => action = Some(Action::Esc),
+                        _ => {}
+                    }
+                }
 
                 if is_typing_focus {
                     if let Some(ref a) = action {
@@ -338,6 +391,12 @@ fn run_app<B: Backend>(
                                 KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => app.jira_projects_input.clear(),
                                 KeyCode::Char(c) => app.jira_projects_input.push(c),
                                 KeyCode::Backspace => { app.jira_projects_input.pop(); }
+                                _ => {}
+                            },
+                            InputFocus::JiraLabels => match key.code {
+                                KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => app.jira_labels_input.clear(),
+                                KeyCode::Char(c) => app.jira_labels_input.push(c),
+                                KeyCode::Backspace => { app.jira_labels_input.pop(); }
                                 _ => {}
                             },
                         },

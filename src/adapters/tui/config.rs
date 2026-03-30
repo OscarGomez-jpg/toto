@@ -25,6 +25,7 @@ pub struct JiraConfig {
     pub email: String,
     pub api_token: String,
     pub projects: Vec<String>,
+    pub labels: Vec<String>,
 }
 
 impl Default for JiraConfig {
@@ -35,6 +36,7 @@ impl Default for JiraConfig {
             email: "".to_string(),
             api_token: "".to_string(),
             projects: vec![],
+            labels: vec![],
         }
     }
 }
@@ -83,6 +85,7 @@ impl Default for Config {
             (KeyConfig::from((KeyCode::PageDown, KeyModifiers::empty())), Action::PageDown),
             (KeyConfig::from((KeyCode::Esc, KeyModifiers::empty())), Action::Esc),
             (KeyConfig::from((KeyCode::Char('s'), KeyModifiers::CONTROL)), Action::SyncJira),
+            (KeyConfig::from((KeyCode::Char('h'), KeyModifiers::empty())), Action::ToggleHelp),
         ];
         keybindings.insert(CurrentScreen::Main, main_keys);
 
@@ -95,6 +98,7 @@ impl Default for Config {
             (KeyConfig::from((KeyCode::Char('j'), KeyModifiers::empty())), Action::MoveDown),
             (KeyConfig::from((KeyCode::Up, KeyModifiers::empty())), Action::MoveUp),
             (KeyConfig::from((KeyCode::Char('k'), KeyModifiers::empty())), Action::MoveUp),
+            (KeyConfig::from((KeyCode::Char('h'), KeyModifiers::empty())), Action::ToggleHelp),
         ];
         keybindings.insert(CurrentScreen::Gantt, gantt_keys);
 
@@ -110,6 +114,7 @@ impl Default for Config {
             (KeyConfig::from((KeyCode::Up, KeyModifiers::empty())), Action::MoveDateUp),
             (KeyConfig::from((KeyCode::Down, KeyModifiers::empty())), Action::MoveDateDown),
             (KeyConfig::from((KeyCode::Char(' '), KeyModifiers::empty())), Action::SelectDate),
+            (KeyConfig::from((KeyCode::Char('h'), KeyModifiers::CONTROL)), Action::ToggleHelp),
         ];
         keybindings.insert(CurrentScreen::Adding, input_keys.clone());
         keybindings.insert(CurrentScreen::Editing, input_keys);
@@ -118,6 +123,7 @@ impl Default for Config {
         let search_keys = vec![
             (KeyConfig::from((KeyCode::Enter, KeyModifiers::empty())), Action::Esc),
             (KeyConfig::from((KeyCode::Esc, KeyModifiers::empty())), Action::Esc),
+            (KeyConfig::from((KeyCode::Char('h'), KeyModifiers::CONTROL)), Action::ToggleHelp),
         ];
         keybindings.insert(CurrentScreen::Searching, search_keys);
 
@@ -127,8 +133,27 @@ impl Default for Config {
             (KeyConfig::from((KeyCode::Enter, KeyModifiers::empty())), Action::ConfirmDelete),
             (KeyConfig::from((KeyCode::Char('n'), KeyModifiers::empty())), Action::Esc),
             (KeyConfig::from((KeyCode::Esc, KeyModifiers::empty())), Action::Esc),
+            (KeyConfig::from((KeyCode::Char('h'), KeyModifiers::empty())), Action::ToggleHelp),
         ];
         keybindings.insert(CurrentScreen::ConfirmingDelete, confirm_keys);
+
+        // JiraConfiguring Screen
+        let jira_keys = vec![
+            (KeyConfig::from((KeyCode::Tab, KeyModifiers::empty())), Action::Tab),
+            (KeyConfig::from((KeyCode::BackTab, KeyModifiers::SHIFT)), Action::BackTab),
+            (KeyConfig::from((KeyCode::Enter, KeyModifiers::empty())), Action::Enter),
+            (KeyConfig::from((KeyCode::Esc, KeyModifiers::empty())), Action::Esc),
+            (KeyConfig::from((KeyCode::Char('h'), KeyModifiers::CONTROL)), Action::ToggleHelp),
+        ];
+        keybindings.insert(CurrentScreen::JiraConfiguring, jira_keys);
+
+        // Help Screen
+        let help_keys = vec![
+            (KeyConfig::from((KeyCode::Char('q'), KeyModifiers::empty())), Action::ToggleHelp),
+            (KeyConfig::from((KeyCode::Esc, KeyModifiers::empty())), Action::ToggleHelp),
+            (KeyConfig::from((KeyCode::Char('h'), KeyModifiers::empty())), Action::ToggleHelp),
+        ];
+        keybindings.insert(CurrentScreen::Help, help_keys);
 
         Config { 
             keybindings,

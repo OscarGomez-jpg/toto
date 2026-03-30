@@ -2,6 +2,7 @@ use crate::domain::task::{Task, TaskSource};
 use crate::ports::outbound::TaskRepository;
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
+use log::{debug, info};
 use rusqlite::{params, Connection};
 use std::error::Error;
 use std::fs;
@@ -16,6 +17,7 @@ pub struct SqliteRepository {
 impl SqliteRepository {
     pub fn new() -> Result<Self, Box<dyn Error>> {
         let db_path = Self::get_db_path();
+        debug!("Opening database at {:?}", db_path);
         Self::migrate_files_to_data_dir(&db_path);
 
         let conn = Connection::open(&db_path)?;
@@ -27,25 +29,34 @@ impl SqliteRepository {
             .collect::<Result<Vec<_>, _>>()?;
 
         if !columns.contains(&"completed".to_string()) {
+            info!("Adding 'completed' column to todo table");
             conn.execute(
                 "ALTER TABLE todo ADD COLUMN completed INTEGER DEFAULT 0",
                 [],
             )?;
         }
         if !columns.contains(&"position".to_string()) {
+            info!("Adding 'position' column to todo table");
             conn.execute("ALTER TABLE todo ADD COLUMN position INTEGER", [])?;
         }
         if !columns.contains(&"start_date".to_string()) {
+            info!("Adding 'start_date' column to todo table");
             conn.execute("ALTER TABLE todo ADD COLUMN start_date TEXT", [])?;
         }
         if !columns.contains(&"end_date".to_string()) {
+            info!("Adding 'end_date' column to todo table");
             conn.execute("ALTER TABLE todo ADD COLUMN end_date TEXT", [])?;
         }
         if !columns.contains(&"external_id".to_string()) {
+            info!("Adding 'external_id' column to todo table");
             conn.execute("ALTER TABLE todo ADD COLUMN external_id TEXT", [])?;
         }
         if !columns.contains(&"source".to_string()) {
-            conn.execute("ALTER TABLE todo ADD COLUMN source TEXT DEFAULT 'Local'", [])?;
+            info!("Adding 'source' column to todo table");
+            conn.execute(
+                "ALTER TABLE todo ADD COLUMN source TEXT DEFAULT 'Local'",
+                [],
+            )?;
         }
 
         conn.execute(
@@ -82,6 +93,10 @@ impl SqliteRepository {
     fn migrate_files_to_data_dir(target_db_path: &Path) {
         let local_db = Path::new("todo.db");
         if local_db.exists() && local_db != target_db_path {
+            info!(
+                "Migrating database file from {:?} to {:?}",
+                local_db, target_db_path
+            );
             let _ = fs::rename(local_db, target_db_path);
         }
     }
@@ -94,6 +109,7 @@ impl TaskRepository for SqliteRepository {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
     ) -> Result<String, Box<dyn Error>> {
+        debug!("Adding local task: {}", content);
         let conn = self.conn.lock().unwrap();
         let id = Uuid::new_v4().to_string();
         let max_pos: i64 =
@@ -160,6 +176,7 @@ impl TaskRepository for SqliteRepository {
     }
 
     fn toggle_completed(&self, id: String) -> Result<(), Box<dyn Error>> {
+        debug!("Toggling completed for task: {}", id);
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE todo SET completed = 1 - completed WHERE id = ?",
@@ -169,6 +186,7 @@ impl TaskRepository for SqliteRepository {
     }
 
     fn toggle_important(&self, id: String) -> Result<(), Box<dyn Error>> {
+        debug!("Toggling important for task: {}", id);
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE todo SET important = 1 - important WHERE id = ?",
@@ -184,6 +202,7 @@ impl TaskRepository for SqliteRepository {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
     ) -> Result<(), Box<dyn Error>> {
+        debug!("Updating content for task: {}", id);
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE todo SET content = ?, start_date = ?, end_date = ? WHERE id = ?",
@@ -198,12 +217,14 @@ impl TaskRepository for SqliteRepository {
     }
 
     fn remove(&self, id: String) -> Result<bool, Box<dyn Error>> {
+        info!("Removing task: {}", id);
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute("DELETE FROM todo WHERE id = ?", params![id])?;
         Ok(rows > 0)
     }
 
     fn clear_completed(&self) -> Result<usize, Box<dyn Error>> {
+        info!("Clearing all completed tasks");
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute("DELETE FROM todo WHERE completed = 1", [])?;
         Ok(rows)
@@ -253,24 +274,30 @@ impl TaskRepository for SqliteRepository {
     }
 
     fn upsert_from_external(&self, task: Task) -> Result<(), Box<dyn Error>> {
-        let conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+
         let source_str = match task.source {
             TaskSource::Jira => "Jira",
             TaskSource::Local => "Local",
         };
 
-        // Check if task exists by external_id
-        let existing_id: Option<String> = conn
+        // 1. Try to find existing task by external_id AND source
+        let existing_id: Option<String> = tx
             .query_row(
-                "SELECT id FROM todo WHERE external_id = ?",
-                params![task.external_id],
+                "SELECT id FROM todo WHERE external_id = ? AND source = ?",
+                params![task.external_id, source_str],
                 |row| row.get(0),
             )
             .ok();
 
         if let Some(id) = existing_id {
-            // Update
-            conn.execute(
+            // 2. Update existing
+            debug!(
+                "Updating existing external task: {} (ID: {}, Source: {})",
+                task.content, id, source_str
+            );
+            tx.execute(
                 "UPDATE todo SET content = ?, completed = ?, start_date = ?, end_date = ? WHERE id = ?",
                 params![
                     task.content,
@@ -281,13 +308,17 @@ impl TaskRepository for SqliteRepository {
                 ],
             )?;
         } else {
-            // Insert
+            // 3. Insert new
+            debug!(
+                "Inserting new external task: {} (Source: {})",
+                task.content, source_str
+            );
             let id = Uuid::new_v4().to_string();
             let max_pos: i64 =
-                conn.query_row("SELECT IFNULL(MAX(position), 0) FROM todo", [], |row| {
+                tx.query_row("SELECT IFNULL(MAX(position), 0) FROM todo", [], |row| {
                     row.get(0)
                 })?;
-            conn.execute(
+            tx.execute(
                 "INSERT INTO todo (id, external_id, source, content, important, completed, start_date, end_date, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     id,
@@ -302,6 +333,8 @@ impl TaskRepository for SqliteRepository {
                 ],
             )?;
         }
+
+        tx.commit()?;
         Ok(())
     }
 }

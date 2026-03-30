@@ -14,6 +14,7 @@ pub enum CurrentScreen {
     ConfirmingDelete,
     Gantt,
     JiraConfiguring,
+    Help,
 }
 
 #[derive(PartialEq)]
@@ -25,6 +26,7 @@ pub enum InputFocus {
     JiraEmail,
     JiraToken,
     JiraProjects,
+    JiraLabels,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -37,6 +39,7 @@ pub enum Action {
     ToggleCompleted,
     ToggleImportant,
     ToggleGantt,
+    ToggleHelp,
     MoveUp,
     MoveDown,
     MoveTaskUp,
@@ -75,6 +78,7 @@ pub struct App {
     pub jira_email_input: String,
     pub jira_api_token_input: String,
     pub jira_projects_input: String,
+    pub jira_labels_input: String,
     pub ticks: u64,
 }
 
@@ -102,6 +106,7 @@ impl App {
             jira_email_input: String::new(),
             jira_api_token_input: String::new(),
             jira_projects_input: String::new(),
+            jira_labels_input: String::new(),
             ticks: 0,
         }
     }
@@ -262,7 +267,8 @@ impl App {
             InputFocus::JiraDomain => InputFocus::JiraEmail,
             InputFocus::JiraEmail => InputFocus::JiraToken,
             InputFocus::JiraToken => InputFocus::JiraProjects,
-            InputFocus::JiraProjects => InputFocus::JiraDomain,
+            InputFocus::JiraProjects => InputFocus::JiraLabels,
+            InputFocus::JiraLabels => InputFocus::JiraDomain,
         };
         self.sync_selected_date();
     }
