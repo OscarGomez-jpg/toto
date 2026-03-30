@@ -15,7 +15,102 @@ pub fn draw_popups(f: &mut Frame, app: &mut App, colors: &Colors) {
     match app.current_screen {
         CurrentScreen::Adding | CurrentScreen::Editing => draw_input_popup(f, app, colors),
         CurrentScreen::ConfirmingDelete => draw_delete_popup(f, app, colors),
+        CurrentScreen::JiraConfiguring => draw_jira_config_popup(f, app, colors),
         _ => {}
+    }
+}
+
+fn draw_jira_config_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
+    let popup_width = (f.area().width as f32 * 0.8).max(50.0).min(100.0) as u16;
+    let popup_height = 18;
+    let area = centered_rect_fixed(popup_width, popup_height, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(colors.accent))
+        .bg(colors.card_bg)
+        .title(" Jira Configuration ");
+    f.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(2)
+        .constraints([
+            Constraint::Length(3), // Domain
+            Constraint::Length(3), // Email
+            Constraint::Length(3), // Token
+            Constraint::Length(3), // Projects
+            Constraint::Length(1), // Help
+        ])
+        .split(area);
+
+    // Domain
+    let domain_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Jira Domain (e.g. your-name.atlassian.net) ")
+        .border_style(if app.input_focus == InputFocus::JiraDomain {
+            Style::default().fg(colors.accent)
+        } else {
+            Style::default().fg(colors.dim_text)
+        });
+    f.render_widget(Paragraph::new(app.jira_domain_input.as_str()).block(domain_block), chunks[0]);
+
+    // Email
+    let email_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Email ")
+        .border_style(if app.input_focus == InputFocus::JiraEmail {
+            Style::default().fg(colors.accent)
+        } else {
+            Style::default().fg(colors.dim_text)
+        });
+    f.render_widget(Paragraph::new(app.jira_email_input.as_str()).block(email_block), chunks[1]);
+
+    // Token
+    let token_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" API Token ")
+        .border_style(if app.input_focus == InputFocus::JiraToken {
+            Style::default().fg(colors.accent)
+        } else {
+            Style::default().fg(colors.dim_text)
+        });
+    let masked_token = "*".repeat(app.jira_api_token_input.len());
+    f.render_widget(Paragraph::new(masked_token).block(token_block), chunks[2]);
+
+    // Projects
+    let projects_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Projects (comma separated, e.g. PROJ1, PROJ2) ")
+        .border_style(if app.input_focus == InputFocus::JiraProjects {
+            Style::default().fg(colors.accent)
+        } else {
+            Style::default().fg(colors.dim_text)
+        });
+    f.render_widget(Paragraph::new(app.jira_projects_input.as_str()).block(projects_block), chunks[3]);
+
+    f.render_widget(
+        Paragraph::new("Tab: Next | Enter: Save & Connect | Esc: Cancel")
+            .style(Style::default().fg(colors.dim_text))
+            .alignment(Alignment::Center),
+        chunks[4],
+    );
+
+    // Set cursor
+    let focus_chunk = match app.input_focus {
+        InputFocus::JiraDomain => Some((chunks[0], &app.jira_domain_input)),
+        InputFocus::JiraEmail => Some((chunks[1], &app.jira_email_input)),
+        InputFocus::JiraToken => Some((chunks[2], &app.jira_api_token_input)),
+        InputFocus::JiraProjects => Some((chunks[3], &app.jira_projects_input)),
+        _ => None,
+    };
+
+    if let Some((chunk, input)) = focus_chunk {
+        f.set_cursor_position((
+            chunk.x + 1 + input.graphemes(true).count() as u16,
+            chunk.y + 1,
+        ));
     }
 }
 

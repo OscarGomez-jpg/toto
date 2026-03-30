@@ -85,4 +85,16 @@ impl TaskServicePort for TaskService {
     fn move_task(&self, id: String, delta: i32) -> Result<(), Box<dyn Error>> {
         self.repository.move_task(id, delta)
     }
+
+    fn sync_jira(&self, config: crate::adapters::tui::config::JiraConfig) -> Result<String, Box<dyn Error>> {
+        let jira_adapter = crate::adapters::jira::JiraAdapter::new(config);
+        let jira_tasks = jira_adapter.fetch_tasks()?;
+        let count = jira_tasks.len();
+        
+        for task in jira_tasks {
+            self.repository.upsert_from_external(task)?;
+        }
+        
+        Ok(format!("Synced {} tasks from Jira", count))
+    }
 }

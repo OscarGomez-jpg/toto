@@ -1,8 +1,9 @@
 use crate::domain::task::Task;
-use chrono::{DateTime, Utc};
 use std::error::Error;
 
-pub trait TaskServicePort {
+use chrono::{DateTime, Utc};
+
+pub trait TaskServicePort: Send + Sync {
     fn add_task(
         &self,
         content: String,
@@ -22,4 +23,5 @@ pub trait TaskServicePort {
     fn remove_task(&self, id: String) -> Result<String, Box<dyn Error>>;
     fn clear_completed_tasks(&self) -> Result<String, Box<dyn Error>>;
     fn move_task(&self, id: String, delta: i32) -> Result<(), Box<dyn Error>>;
+    fn sync_jira(&self, config: crate::adapters::tui::config::JiraConfig) -> Result<String, Box<dyn Error>>;
 }

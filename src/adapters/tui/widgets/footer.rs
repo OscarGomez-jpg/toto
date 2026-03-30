@@ -17,6 +17,7 @@ pub fn draw_footer(f: &mut Frame, app: &mut App, area: Rect, colors: &Colors) {
         CurrentScreen::Editing => "enter:update  ^c/^u:clear  ^w:word  esc:cancel",
         CurrentScreen::Searching => "enter:done  esc:reset",
         CurrentScreen::ConfirmingDelete => "Confirm delete? (y/n)",
+        CurrentScreen::JiraConfiguring => "enter:save  tab:next  esc:cancel",
     };
     f.render_widget(
         Paragraph::new(help)

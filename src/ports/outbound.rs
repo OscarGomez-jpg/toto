@@ -23,4 +23,5 @@ pub trait TaskRepository: Send + Sync {
     fn remove(&self, id: String) -> Result<bool, Box<dyn Error>>;
     fn clear_completed(&self) -> Result<usize, Box<dyn Error>>;
     fn move_task(&self, id: String, delta: i32) -> Result<(), Box<dyn Error>>;
+    fn upsert_from_external(&self, task: Task) -> Result<(), Box<dyn Error>>;
 }

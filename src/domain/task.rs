@@ -1,8 +1,16 @@
 use chrono::{DateTime, Utc};
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum TaskSource {
+    Local,
+    Jira,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Task {
     pub id: String,
+    pub external_id: Option<String>,
+    pub source: TaskSource,
     pub content: String,
     pub important: bool,
     pub completed: bool,
@@ -14,6 +22,8 @@ impl Task {
     pub fn new(id: String, content: String) -> Self {
         Self {
             id,
+            external_id: None,
+            source: TaskSource::Local,
             content,
             important: false,
             completed: false,

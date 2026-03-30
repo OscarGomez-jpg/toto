@@ -13,6 +13,7 @@ pub enum CurrentScreen {
     Searching,
     ConfirmingDelete,
     Gantt,
+    JiraConfiguring,
 }
 
 #[derive(PartialEq)]
@@ -20,6 +21,10 @@ pub enum InputFocus {
     Content,
     StartDate,
     EndDate,
+    JiraDomain,
+    JiraEmail,
+    JiraToken,
+    JiraProjects,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -41,6 +46,7 @@ pub enum Action {
     PageUp,
     PageDown,
     Search,
+    SyncJira,
     ClearCompleted,
     Esc,
     Enter,
@@ -65,6 +71,10 @@ pub struct App {
     pub search_query: String,
     pub editing_id: Option<String>,
     pub selected_date: chrono::NaiveDate,
+    pub jira_domain_input: String,
+    pub jira_email_input: String,
+    pub jira_api_token_input: String,
+    pub jira_projects_input: String,
     pub ticks: u64,
 }
 
@@ -88,6 +98,10 @@ impl App {
             search_query: String::new(),
             editing_id: None,
             selected_date: Utc::now().date_naive(),
+            jira_domain_input: String::new(),
+            jira_email_input: String::new(),
+            jira_api_token_input: String::new(),
+            jira_projects_input: String::new(),
             ticks: 0,
         }
     }
@@ -245,6 +259,10 @@ impl App {
             InputFocus::Content => InputFocus::StartDate,
             InputFocus::StartDate => InputFocus::EndDate,
             InputFocus::EndDate => InputFocus::Content,
+            InputFocus::JiraDomain => InputFocus::JiraEmail,
+            InputFocus::JiraEmail => InputFocus::JiraToken,
+            InputFocus::JiraToken => InputFocus::JiraProjects,
+            InputFocus::JiraProjects => InputFocus::JiraDomain,
         };
         self.sync_selected_date();
     }

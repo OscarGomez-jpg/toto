@@ -1,4 +1,4 @@
-use crate::domain::task::Task;
+use crate::domain::task::{Task, TaskSource};
 use crate::ports::outbound::TaskRepository;
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
@@ -20,37 +20,7 @@ impl SqliteRepository {
 
         let conn = Connection::open(&db_path)?;
 
-        // 1. Check if we need to migrate id from INTEGER to TEXT
-        let id_type: String = conn
-            .query_row(
-                "SELECT type FROM pragma_table_info('todo') WHERE name='id'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or_else(|_| "INTEGER".to_string());
-
-        if id_type == "INTEGER" {
-            // Migration from very old numeric ID schema
-            conn.execute_batch(
-                "BEGIN TRANSACTION;
-                 CREATE TABLE todo_new (
-                    id TEXT PRIMARY KEY,
-                    content TEXT NOT NULL,
-                    important INTEGER DEFAULT 0,
-                    completed INTEGER DEFAULT 0,
-                    start_date TEXT,
-                    end_date TEXT,
-                    position INTEGER
-                 );
-                 INSERT INTO todo_new (id, content, important, completed, position)
-                 SELECT CAST(id AS TEXT), content, important, completed, id FROM todo;
-                 DROP TABLE todo;
-                 ALTER TABLE todo_new RENAME TO todo;
-                 COMMIT;",
-            )?;
-        }
-
-        // 2. Ensure all required columns exist
+        // Ensure all required columns exist
         let columns: Vec<String> = conn
             .prepare("SELECT name FROM pragma_table_info('todo')")?
             .query_map([], |row| row.get(0))?
@@ -69,19 +39,20 @@ impl SqliteRepository {
             conn.execute("ALTER TABLE todo ADD COLUMN start_date TEXT", [])?;
         }
         if !columns.contains(&"end_date".to_string()) {
-            // If we have an old due_date column, migrate its data to end_date
             conn.execute("ALTER TABLE todo ADD COLUMN end_date TEXT", [])?;
-            if columns.contains(&"due_date".to_string()) {
-                conn.execute(
-                    "UPDATE todo SET end_date = due_date WHERE end_date IS NULL",
-                    [],
-                )?;
-            }
+        }
+        if !columns.contains(&"external_id".to_string()) {
+            conn.execute("ALTER TABLE todo ADD COLUMN external_id TEXT", [])?;
+        }
+        if !columns.contains(&"source".to_string()) {
+            conn.execute("ALTER TABLE todo ADD COLUMN source TEXT DEFAULT 'Local'", [])?;
         }
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS todo (
                 id TEXT PRIMARY KEY,
+                external_id TEXT,
+                source TEXT DEFAULT 'Local',
                 content TEXT NOT NULL,
                 important INTEGER DEFAULT 0,
                 completed INTEGER DEFAULT 0,
@@ -130,13 +101,14 @@ impl TaskRepository for SqliteRepository {
                 row.get(0)
             })?;
         conn.execute(
-            "INSERT INTO todo (id, content, position, start_date, end_date) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO todo (id, content, position, start_date, end_date, source) VALUES (?, ?, ?, ?, ?, ?)",
             params![
                 id,
                 content,
                 max_pos + 1,
                 start_date.map(|d| d.to_rfc3339()),
-                end_date.map(|d| d.to_rfc3339())
+                end_date.map(|d| d.to_rfc3339()),
+                "Local"
             ],
         )?;
         Ok(id)
@@ -144,10 +116,14 @@ impl TaskRepository for SqliteRepository {
 
     fn get_all(&self) -> Result<Vec<Task>, Box<dyn Error>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, content, important, completed, start_date, end_date FROM todo ORDER BY completed ASC, position DESC, id DESC")?;
+        let mut stmt = conn.prepare("SELECT id, content, important, completed, start_date, end_date, external_id, source FROM todo ORDER BY completed ASC, position DESC, id DESC")?;
         let todo_iter = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let content: String = row.get(1)?;
             let start_date_str: Option<String> = row.get(4)?;
             let end_date_str: Option<String> = row.get(5)?;
+            let external_id: Option<String> = row.get(6)?;
+            let source_str: String = row.get(7)?;
 
             let start_date = start_date_str.and_then(|s| {
                 DateTime::parse_from_rfc3339(&s)
@@ -160,11 +136,18 @@ impl TaskRepository for SqliteRepository {
                     .map(|d| d.with_timezone(&Utc))
             });
 
-            let mut task = Task::new(row.get(0)?, row.get(1)?);
+            let source = match source_str.as_str() {
+                "Jira" => TaskSource::Jira,
+                _ => TaskSource::Local,
+            };
+
+            let mut task = Task::new(id, content);
             task.important = row.get::<_, i32>(2)? != 0;
             task.completed = row.get::<_, i32>(3)? != 0;
             task.start_date = start_date;
             task.end_date = end_date;
+            task.external_id = external_id;
+            task.source = source;
 
             Ok(task)
         })?;
@@ -234,9 +217,7 @@ impl TaskRepository for SqliteRepository {
             |row| row.get(0),
         )?;
 
-        // Find the task to swap with
         let target_id: Option<String> = if delta > 0 {
-            // Move up (increase position)
             conn.query_row(
                 "SELECT id FROM todo WHERE position > ? ORDER BY position ASC LIMIT 1",
                 params![current_pos],
@@ -244,7 +225,6 @@ impl TaskRepository for SqliteRepository {
             )
             .ok()
         } else {
-            // Move down (decrease position)
             conn.query_row(
                 "SELECT id FROM todo WHERE position < ? ORDER BY position DESC LIMIT 1",
                 params![current_pos],
@@ -269,6 +249,59 @@ impl TaskRepository for SqliteRepository {
             )?;
         }
 
+        Ok(())
+    }
+
+    fn upsert_from_external(&self, task: Task) -> Result<(), Box<dyn Error>> {
+        let conn = self.conn.lock().unwrap();
+        let source_str = match task.source {
+            TaskSource::Jira => "Jira",
+            TaskSource::Local => "Local",
+        };
+
+        // Check if task exists by external_id
+        let existing_id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM todo WHERE external_id = ?",
+                params![task.external_id],
+                |row| row.get(0),
+            )
+            .ok();
+
+        if let Some(id) = existing_id {
+            // Update
+            conn.execute(
+                "UPDATE todo SET content = ?, completed = ?, start_date = ?, end_date = ? WHERE id = ?",
+                params![
+                    task.content,
+                    if task.completed { 1 } else { 0 },
+                    task.start_date.map(|d| d.to_rfc3339()),
+                    task.end_date.map(|d| d.to_rfc3339()),
+                    id
+                ],
+            )?;
+        } else {
+            // Insert
+            let id = Uuid::new_v4().to_string();
+            let max_pos: i64 =
+                conn.query_row("SELECT IFNULL(MAX(position), 0) FROM todo", [], |row| {
+                    row.get(0)
+                })?;
+            conn.execute(
+                "INSERT INTO todo (id, external_id, source, content, important, completed, start_date, end_date, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    id,
+                    task.external_id,
+                    source_str,
+                    task.content,
+                    if task.important { 1 } else { 0 },
+                    if task.completed { 1 } else { 0 },
+                    task.start_date.map(|d| d.to_rfc3339()),
+                    task.end_date.map(|d| d.to_rfc3339()),
+                    max_pos + 1
+                ],
+            )?;
+        }
         Ok(())
     }
 }
