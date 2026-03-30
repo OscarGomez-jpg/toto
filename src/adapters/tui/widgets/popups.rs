@@ -143,7 +143,10 @@ fn draw_input_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
     if app.input_focus == InputFocus::StartDate || app.input_focus == InputFocus::EndDate {
         let calendar_date = app.get_time_date();
         let mut events = CalendarEventStore::default();
-        events.add(calendar_date, Style::default().bg(colors.accent).fg(colors.bg));
+        events.add(
+            calendar_date,
+            Style::default().bg(colors.accent).fg(colors.bg),
+        );
 
         let calendar = Monthly::new(calendar_date, events)
             .block(Block::default().borders(Borders::ALL).title(" Calendar "))

@@ -325,13 +325,7 @@ impl App {
         let month = self.selected_date.month() as u8;
         let day = self.selected_date.day() as u8;
 
-        time::Date::from_calendar_date(
-            year,
-            Month::try_from(month).unwrap_or(Month::January),
-            day,
-        )
-        .unwrap_or_else(|_| {
-            time::Date::from_calendar_date(2026, Month::January, 1).unwrap()
-        })
+        time::Date::from_calendar_date(year, Month::try_from(month).unwrap_or(Month::January), day)
+            .unwrap_or_else(|_| time::Date::from_calendar_date(2026, Month::January, 1).unwrap())
     }
 }
