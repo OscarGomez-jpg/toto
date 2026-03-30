@@ -3,6 +3,7 @@ use std::error::Error;
 
 use chrono::{DateTime, Utc};
 
+#[cfg_attr(test, mockall::automock)]
 pub trait TaskRepository: Send + Sync {
     fn add(
         &self,

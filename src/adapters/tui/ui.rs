@@ -54,3 +54,104 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     // Overlays
     draw_popups(f, app, &colors);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapters::tui::app::App;
+    use crate::ports::inbound::MockTaskServicePort;
+    use ratatui::{backend::TestBackend, Terminal};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_ui_main_screen_snapshot() {
+        let mut mock_service = MockTaskServicePort::new();
+        mock_service.expect_get_all_tasks()
+            .returning(|| Ok(vec![]));
+
+        let mut app = App::new(Arc::new(mock_service));
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|f| ui(f, &mut app)).unwrap();
+
+        let view = format!("{:?}", terminal.backend());
+        // Scrub dynamic parts
+        let scrubbed = scrub_ui_view(&view);
+        insta::assert_snapshot!(scrubbed);
+    }
+
+    fn scrub_ui_view(view: &str) -> String {
+        let mut result = view.to_string();
+        // Scrub Date (YYYY-MM-DD and partials like MM-DD)
+        let re_date = regex::Regex::new(r"\d{4}-\d{2}-\d{2}").unwrap();
+        result = re_date.replace_all(&result, "YYYY-MM-DD").to_string();
+        let re_date_partial = regex::Regex::new(r"\d{2}-\d{2}").unwrap();
+        result = re_date_partial.replace_all(&result, "MM-DD").to_string();
+
+        // Scrub Time (HH:MM:SS and partials like :SS)
+        let re_time = regex::Regex::new(r"\d{2}:\d{2}:\d{2}").unwrap();
+        result = re_time.replace_all(&result, "HH:MM:SS").to_string();
+        let re_time_partial = regex::Regex::new(r":\d{2}").unwrap();
+        result = re_time_partial.replace_all(&result, ":XX").to_string();
+
+        // Scrub Latency (XXms)
+        let re_latency = regex::Regex::new(r"\d{2}ms").unwrap();
+        result = re_latency.replace_all(&result, "XXms").to_string();
+        // Scrub Entropy (0xXXXX)
+        let re_entropy = regex::Regex::new(r"0x[0-9A-F]{4}").unwrap();
+        result = re_entropy.replace_all(&result, "0xXXXX").to_string();
+        result
+    }
+
+    #[test]
+    fn test_ui_gantt_screen_snapshot() {
+        let mut mock_service = MockTaskServicePort::new();
+        mock_service.expect_get_all_tasks()
+            .returning(|| Ok(vec![]));
+
+        let mut app = App::new(Arc::new(mock_service));
+        app.current_screen = CurrentScreen::Gantt;
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|f| ui(f, &mut app)).unwrap();
+
+        let view = format!("{:?}", terminal.backend());
+        insta::assert_snapshot!(scrub_ui_view(&view));
+    }
+
+    #[test]
+    fn test_ui_help_screen_snapshot() {
+        let mut mock_service = MockTaskServicePort::new();
+        mock_service.expect_get_all_tasks()
+            .returning(|| Ok(vec![]));
+
+        let mut app = App::new(Arc::new(mock_service));
+        app.current_screen = CurrentScreen::Help;
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|f| ui(f, &mut app)).unwrap();
+
+        let view = format!("{:?}", terminal.backend());
+        insta::assert_snapshot!(scrub_ui_view(&view));
+    }
+
+    #[test]
+    fn test_ui_jira_config_screen_snapshot() {
+        let mut mock_service = MockTaskServicePort::new();
+        mock_service.expect_get_all_tasks()
+            .returning(|| Ok(vec![]));
+
+        let mut app = App::new(Arc::new(mock_service));
+        app.current_screen = CurrentScreen::JiraConfiguring;
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|f| ui(f, &mut app)).unwrap();
+
+        let view = format!("{:?}", terminal.backend());
+        insta::assert_snapshot!(scrub_ui_view(&view));
+    }
+    }

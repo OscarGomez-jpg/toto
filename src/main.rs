@@ -1,7 +1,3 @@
-mod adapters;
-mod domain;
-mod ports;
-
 use clap::{arg, command};
 use directories::ProjectDirs;
 use log::{info, LevelFilter};
@@ -9,10 +5,10 @@ use simplelog::{Config as LogConfig, WriteLogger};
 use std::fs::File;
 use std::sync::Arc;
 
-use crate::adapters::storage::sqlite::SqliteRepository;
-use crate::adapters::tui::runner::run_tui;
-use crate::domain::service::TaskService;
-use crate::ports::inbound::TaskServicePort;
+use toto::adapters::storage::sqlite::SqliteRepository;
+use toto::adapters::tui::runner::run_tui;
+use toto::domain::service::TaskService;
+use toto::ports::inbound::TaskServicePort;
 
 fn init_logger() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(proj_dirs) = ProjectDirs::from("", "", "toto") {
@@ -50,7 +46,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .get_matches();
 
+    // 1. Initialize Adapters (Infrastructure)
     let repository = Arc::new(SqliteRepository::new()?);
+
+    // 2. Initialize Core (Domain) with Ports
     let task_service: Arc<dyn TaskServicePort> = Arc::new(TaskService::new(repository));
 
     let mut performed_action = false;
@@ -65,7 +64,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .ok()
             .map(|d| d.with_timezone(&chrono::Utc))
     });
-
     let end_date = matches.get_one::<String>("end").and_then(|s| {
         let full = if s.len() == 10 {
             format!("{}T23:59:59Z", s)
@@ -124,7 +122,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if matches.get_flag("reset-config") {
-        let config = crate::adapters::tui::config::Config::default();
+        let config = toto::adapters::tui::config::Config::default();
         config.save()?;
         println!("Configuration reset to defaults.");
         performed_action = true;

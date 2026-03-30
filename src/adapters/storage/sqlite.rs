@@ -21,8 +21,40 @@ impl SqliteRepository {
         Self::migrate_files_to_data_dir(&db_path);
 
         let conn = Connection::open(&db_path)?;
+        Self::setup_db(&conn)?;
 
-        // Ensure all required columns exist
+        let repo = SqliteRepository {
+            conn: Mutex::new(conn),
+        };
+        Ok(repo)
+    }
+
+    pub fn new_in_memory() -> Result<Self, Box<dyn Error>> {
+        let conn = Connection::open_in_memory()?;
+        Self::setup_db(&conn)?;
+        Ok(SqliteRepository {
+            conn: Mutex::new(conn),
+        })
+    }
+
+    fn setup_db(conn: &Connection) -> Result<(), Box<dyn Error>> {
+        // Ensure the table exists
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS todo (
+                id TEXT PRIMARY KEY,
+                external_id TEXT,
+                source TEXT DEFAULT 'Local',
+                content TEXT NOT NULL,
+                important INTEGER DEFAULT 0,
+                completed INTEGER DEFAULT 0,
+                start_date TEXT,
+                end_date TEXT,
+                position INTEGER
+            )",
+            [],
+        )?;
+
+        // Ensure all required columns exist (for migrations)
         let columns: Vec<String> = conn
             .prepare("SELECT name FROM pragma_table_info('todo')")?
             .query_map([], |row| row.get(0))?
@@ -59,25 +91,7 @@ impl SqliteRepository {
             )?;
         }
 
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS todo (
-                id TEXT PRIMARY KEY,
-                external_id TEXT,
-                source TEXT DEFAULT 'Local',
-                content TEXT NOT NULL,
-                important INTEGER DEFAULT 0,
-                completed INTEGER DEFAULT 0,
-                start_date TEXT,
-                end_date TEXT,
-                position INTEGER
-            )",
-            [],
-        )?;
-
-        let repo = SqliteRepository {
-            conn: Mutex::new(conn),
-        };
-        Ok(repo)
+        Ok(())
     }
 
     fn get_db_path() -> PathBuf {

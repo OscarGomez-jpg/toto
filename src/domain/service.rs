@@ -86,15 +86,58 @@ impl TaskServicePort for TaskService {
         self.repository.move_task(id, delta)
     }
 
-    fn sync_jira(&self, config: crate::adapters::tui::config::JiraConfig) -> Result<String, Box<dyn Error>> {
+    fn sync_jira(
+        &self,
+        config: crate::adapters::tui::config::JiraConfig,
+    ) -> Result<String, Box<dyn Error>> {
         let jira_adapter = crate::adapters::jira::JiraAdapter::new(config);
         let jira_tasks = jira_adapter.fetch_tasks()?;
         let count = jira_tasks.len();
-        
+
         for task in jira_tasks {
             self.repository.upsert_from_external(task)?;
         }
-        
+
         Ok(format!("Synced {} tasks from Jira", count))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ports::outbound::MockTaskRepository;
+    use mockall::predicate::*;
+
+    #[test]
+    fn test_add_task_valid() {
+        let mut mock_repo = MockTaskRepository::new();
+        mock_repo
+            .expect_add()
+            .with(eq("test".to_string()), eq(None), eq(None))
+            .times(1)
+            .returning(|_, _, _| Ok("1".to_string()));
+
+        let service = TaskService::new(Arc::new(mock_repo));
+        let result = service.add_task("test".to_string(), None, None);
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "1");
+    }
+
+    #[test]
+    fn test_add_task_invalid_date_range() {
+        let mock_repo = MockTaskRepository::new();
+        let service = TaskService::new(Arc::new(mock_repo));
+
+        let now = Utc::now();
+        let start = Some(now);
+        let end = Some(now - chrono::Duration::days(1));
+
+        let result = service.add_task("test".to_string(), start, end);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid date range"));
     }
 }

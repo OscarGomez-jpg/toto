@@ -39,3 +39,33 @@ impl Task {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    #[test]
+    fn test_task_new() {
+        let task = Task::new("1".to_string(), "test".to_string());
+        assert_eq!(task.id, "1");
+        assert_eq!(task.content, "test");
+        assert!(!task.completed);
+        assert!(!task.important);
+        assert_eq!(task.source, TaskSource::Local);
+    }
+
+    #[test]
+    fn test_is_valid_range() {
+        let mut task = Task::new("1".to_string(), "test".to_string());
+        assert!(task.is_valid_range());
+
+        let now = Utc::now();
+        task.start_date = Some(now);
+        task.end_date = Some(now + Duration::days(1));
+        assert!(task.is_valid_range());
+
+        task.end_date = Some(now - Duration::days(1));
+        assert!(!task.is_valid_range());
+    }
+}
