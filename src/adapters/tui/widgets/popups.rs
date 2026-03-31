@@ -1,6 +1,7 @@
 use crate::adapters::tui::app::{App, CurrentScreen, InputFocus};
 use crate::adapters::tui::widgets::colors::Colors;
 use crate::adapters::tui::widgets::utils::{centered_rect, centered_rect_fixed};
+use log::{debug, info};
 use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::calendar::{CalendarEventStore, Monthly};
@@ -242,16 +243,53 @@ fn draw_input_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
         } else {
             Style::default().fg(colors.dim_text)
         });
+
     let inner_w = left_chunks[0].width.saturating_sub(2);
-    let text_len = app.input.graphemes(true).count() + 2;
-    let cursor_line = if inner_w > 0 {
-        (text_len as u16) / inner_w
-    } else {
-        0
-    };
+    let mut cursor_y = 0;
+    let mut cursor_x = 0;
+
+    if inner_w > 0 {
+        let full_text = format!("> {}", app.input);
+        let mut current_line_width = 0;
+
+        for word in full_text.split_inclusive(' ') {
+            let word_width = word.graphemes(true).count();
+            if current_line_width + word_width <= inner_w as usize {
+                current_line_width += word_width;
+            } else {
+                if word_width > inner_w as usize {
+                    let mut remaining = word_width;
+                    while remaining > 0 {
+                        let space = inner_w as usize - current_line_width;
+                        if space == 0 {
+                            cursor_y += 1;
+                            current_line_width = 0;
+                            continue;
+                        }
+                        let take = space.min(remaining);
+                        current_line_width += take;
+                        remaining -= take;
+                        if remaining > 0 {
+                            cursor_y += 1;
+                            current_line_width = 0;
+                        }
+                    }
+                } else {
+                    cursor_y += 1;
+                    current_line_width = word_width;
+                }
+            }
+        }
+        cursor_x = current_line_width as u16;
+        if cursor_x == inner_w {
+            cursor_y += 1;
+            cursor_x = 0;
+        }
+    }
+
     let max_h = left_chunks[0].height.saturating_sub(2);
-    let scroll = if cursor_line >= max_h {
-        cursor_line - max_h + 1
+    let scroll = if cursor_y >= max_h {
+        cursor_y - max_h + 1
     } else {
         0
     };
@@ -263,10 +301,11 @@ fn draw_input_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
             .scroll((scroll, 0)),
         left_chunks[0],
     );
+
     if app.input_focus == InputFocus::Content && inner_w > 0 {
         f.set_cursor_position((
-            left_chunks[0].x + 1 + (text_len as u16 % inner_w),
-            left_chunks[0].y + 1 + cursor_line.saturating_sub(scroll),
+            left_chunks[0].x + 1 + cursor_x,
+            left_chunks[0].y + 1 + cursor_y.saturating_sub(scroll),
         ));
     }
 
