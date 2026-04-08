@@ -1,7 +1,6 @@
 use crate::adapters::tui::app::{App, CurrentScreen, InputFocus};
 use crate::adapters::tui::widgets::colors::Colors;
 use crate::adapters::tui::widgets::utils::{centered_rect, centered_rect_fixed};
-use log::{debug, info};
 use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::calendar::{CalendarEventStore, Monthly};

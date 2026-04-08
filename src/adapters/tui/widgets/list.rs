@@ -1,5 +1,6 @@
 use crate::adapters::tui::app::App;
 use crate::adapters::tui::widgets::colors::Colors;
+use chrono::Local;
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -36,8 +37,37 @@ pub fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect, colors: &Colors)
                     s.format("%Y-%m-%d"),
                     e.format("%Y-%m-%d")
                 ),
-                (Some(s), None) => format!(" (Start: {: >10})", s.format("%Y-%m-%d")),
-                (None, Some(e)) => format!(" (End: {: >10})", e.format("%Y-%m-%d")),
+                //TODO: Check if this can be cached so it does not get checked every frame
+                (Some(s), None) => {
+                    let naive_start_date = s.with_timezone(&Local).date_naive();
+                    let today = Local::now().date_naive();
+                    let days_since = if today > naive_start_date {
+                        (today - naive_start_date).num_days()
+                    } else {
+                        0
+                    };
+
+                    format!(
+                        " (Started: {: >10}, {} days ago)",
+                        s.format("%Y-%m-%d"),
+                        days_since
+                    )
+                }
+                (None, Some(e)) => {
+                    let naive_end = e.with_timezone(&Local).date_naive();
+                    let today = Local::now().date_naive();
+                    let days_until = if naive_end > today {
+                        (naive_end - today).num_days()
+                    } else {
+                        0
+                    };
+
+                    format!(
+                        " (End: {: >10}, in {} days)",
+                        e.format("%Y-%m-%d"),
+                        days_until
+                    )
+                }
                 (None, None) => "".to_string(),
             };
 
