@@ -29,19 +29,19 @@ pub fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect, colors: &Colors)
 
     // TODO: Make the ordering scalable
     items.sort_by(|a, b| {
-        match (&a.start_date, &b.start_date) {
-            (Some(da), Some(db)) => da.cmp(db),
+        match (a.start_date(), b.start_date()) {
+            (Some(da), Some(db)) => da.cmp(&db),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => std::cmp::Ordering::Equal,
         }
-        .then_with(|| match (&a.end_date, &b.end_date) {
-            (Some(da), Some(db)) => da.cmp(db),
+        .then_with(|| match (a.end_date(), b.end_date()) {
+            (Some(da), Some(db)) => da.cmp(&db),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => std::cmp::Ordering::Equal,
         })
-        .then_with(|| a.title.cmp(&b.title))
+        .then_with(|| a.title().cmp(&b.title()))
         .then_with(|| a.id.cmp(&b.id))
     });
 

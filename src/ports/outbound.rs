@@ -4,7 +4,7 @@ use std::error::Error;
 use chrono::{DateTime, Utc};
 
 /// Defines the interface for persisting task data.
-/// 
+///
 /// This port is implemented by outbound adapters (like SQLite) to store
 /// and retrieve domain entities.
 #[cfg_attr(test, mockall::automock)]
@@ -45,6 +45,22 @@ pub trait TaskRepository: Send + Sync {
 
     /// Adjusts the relative position of a task in the list.
     fn move_task(&self, id: String, delta: i32) -> Result<(), Box<dyn Error>>;
+
+    /// Adds a tag to a task.
+    fn add_tag(&self, id: String, tag: String) -> Result<(), Box<dyn Error>>;
+
+    /// Removes a tag from a task.
+    fn remove_tag(&self, id: String, tag: String) -> Result<(), Box<dyn Error>>;
+
+    /// Adds a relation to a task.
+    fn add_relation(
+        &self,
+        id: String,
+        relation: crate::domain::task::TaskRelation,
+    ) -> Result<(), Box<dyn Error>>;
+
+    /// Removes a relation from a task.
+    fn remove_relation(&self, id: String, target_id: String) -> Result<(), Box<dyn Error>>;
 
     /// Inserts or updates a task that originated from an external source (e.g., Jira).
     fn upsert_from_external(&self, task: Task) -> Result<(), Box<dyn Error>>;

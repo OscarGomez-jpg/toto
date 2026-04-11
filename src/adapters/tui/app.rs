@@ -122,18 +122,38 @@ impl App {
 
     pub fn get_filtered_items(&self) -> Vec<Task> {
         let items = self.task_service.get_all_tasks().unwrap_or_default();
-        if self.search_query.is_empty() {
+        let mut filtered: Vec<Task> = if self.search_query.is_empty() {
             items
         } else {
             let query = self.search_query.to_lowercase();
             items
                 .into_iter()
                 .filter(|item| {
-                    item.title.to_lowercase().contains(&query)
-                        || item.description.to_lowercase().contains(&query)
+                    item.title().to_lowercase().contains(&query)
+                        || item.description().to_lowercase().contains(&query)
                 })
                 .collect()
-        }
+        };
+
+        // Consistent sorting for UI and Actions
+        filtered.sort_by(|a, b| {
+            match (a.start_date(), b.start_date()) {
+                (Some(da), Some(db)) => da.cmp(&db),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+            .then_with(|| match (a.end_date(), b.end_date()) {
+                (Some(da), Some(db)) => da.cmp(&db),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            })
+            .then_with(|| a.title().cmp(&b.title()))
+            .then_with(|| a.id.cmp(&b.id))
+        });
+
+        filtered
     }
 
     pub fn next(&mut self) {

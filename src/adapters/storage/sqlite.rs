@@ -3,7 +3,7 @@ use crate::ports::outbound::TaskRepository;
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
 use log::{debug, info};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -65,13 +65,19 @@ impl SqliteRepository {
             info!("Adding 'title' column to todo table");
             conn.execute("ALTER TABLE todo ADD COLUMN title TEXT DEFAULT ''", [])?;
         }
-        if columns.contains(&"content".to_string()) && !columns.contains(&"description".to_string()) {
+        if columns.contains(&"content".to_string()) && !columns.contains(&"description".to_string())
+        {
             info!("Renaming 'content' to 'description'");
             conn.execute("ALTER TABLE todo RENAME COLUMN content TO description", [])?;
         }
-        if !columns.contains(&"description".to_string()) && !columns.contains(&"content".to_string()) {
+        if !columns.contains(&"description".to_string())
+            && !columns.contains(&"content".to_string())
+        {
             info!("Adding 'description' column to todo table");
-            conn.execute("ALTER TABLE todo ADD COLUMN description TEXT DEFAULT ''", [])?;
+            conn.execute(
+                "ALTER TABLE todo ADD COLUMN description TEXT DEFAULT ''",
+                [],
+            )?;
         }
         if !columns.contains(&"completed".to_string()) {
             info!("Adding 'completed' column to todo table");
@@ -103,6 +109,10 @@ impl SqliteRepository {
                 [],
             )?;
         }
+        if !columns.contains(&"features".to_string()) {
+            info!("Adding 'features' column to todo table");
+            conn.execute("ALTER TABLE todo ADD COLUMN features TEXT", [])?;
+        }
 
         Ok(())
     }
@@ -127,6 +137,43 @@ impl SqliteRepository {
             let _ = fs::rename(local_db, target_db_path);
         }
     }
+
+    fn get_task_features(
+        &self,
+        id: &str,
+    ) -> Result<serde_json::Map<String, serde_json::Value>, Box<dyn Error>> {
+        let conn = self.conn.lock().unwrap();
+        let features_json: Option<String> = conn
+            .query_row(
+                "SELECT features FROM todo WHERE id = ?",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+
+        match features_json {
+            Some(json_str) => {
+                let map = serde_json::from_str(&json_str)?;
+                Ok(map)
+            }
+            None => Ok(serde_json::Map::new()),
+        }
+    }
+
+    fn save_task_features(
+        &self,
+        id: &str,
+        features: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let conn = self.conn.lock().unwrap();
+        let json_str = serde_json::to_string(&features)?;
+        conn.execute(
+            "UPDATE todo SET features = ? WHERE id = ?",
+            params![json_str, id],
+        )?;
+        Ok(())
+    }
 }
 
 impl TaskRepository for SqliteRepository {
@@ -144,8 +191,12 @@ impl TaskRepository for SqliteRepository {
             conn.query_row("SELECT IFNULL(MAX(position), 0) FROM todo", [], |row| {
                 row.get(0)
             })?;
+
+        let features = serde_json::Map::new();
+        let features_json = serde_json::to_string(&features)?;
+
         conn.execute(
-            "INSERT INTO todo (id, title, description, position, start_date, end_date, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO todo (id, title, description, position, start_date, end_date, source, features) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 id,
                 title,
@@ -153,7 +204,8 @@ impl TaskRepository for SqliteRepository {
                 max_pos + 1,
                 start_date.map(|d| d.to_rfc3339()),
                 end_date.map(|d| d.to_rfc3339()),
-                "Local"
+                "Local",
+                features_json
             ],
         )?;
         Ok(id)
@@ -161,7 +213,7 @@ impl TaskRepository for SqliteRepository {
 
     fn get_all(&self) -> Result<Vec<Task>, Box<dyn Error>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, title, description, important, completed, start_date, end_date, external_id, source FROM todo ORDER BY completed ASC, position DESC, id DESC")?;
+        let mut stmt = conn.prepare("SELECT id, title, description, important, completed, start_date, end_date, external_id, source, features FROM todo ORDER BY completed ASC, position DESC, id DESC")?;
         let todo_iter = stmt.query_map([], |row| {
             let id: String = row.get(0)?;
             let title: String = row.get(1)?;
@@ -170,6 +222,7 @@ impl TaskRepository for SqliteRepository {
             let end_date_str: Option<String> = row.get(6)?;
             let external_id: Option<String> = row.get(7)?;
             let source_str: String = row.get(8)?;
+            let features_json: Option<String> = row.get(9)?;
 
             let start_date = start_date_str.and_then(|s| {
                 DateTime::parse_from_rfc3339(&s)
@@ -187,15 +240,33 @@ impl TaskRepository for SqliteRepository {
                 _ => TaskSource::Local,
             };
 
-            let mut task = Task::new(id, title, description);
-            task.important = row.get::<_, i32>(3)? != 0;
-            task.completed = row.get::<_, i32>(4)? != 0;
-            task.start_date = start_date;
-            task.end_date = end_date;
-            task.external_id = external_id;
-            task.source = source;
+            let mut builder = crate::domain::task::TaskBuilder::new(id)
+                .with_metadata(title, description)
+                .with_status(row.get::<_, i32>(4)? != 0, row.get::<_, i32>(3)? != 0)
+                .with_schedule(start_date, end_date)
+                .with_external(external_id, source);
 
-            Ok(task)
+            if let Some(json_str) = features_json {
+                if let Ok(features_map) =
+                    serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&json_str)
+                {
+                    if let Some(tags_val) = features_map.get("tags") {
+                        if let Ok(tags) = serde_json::from_value::<Vec<String>>(tags_val.clone()) {
+                            builder = builder.with_tags(tags);
+                        }
+                    }
+                    if let Some(relations_val) = features_map.get("relations") {
+                        if let Ok(relations) = serde_json::from_value::<
+                            Vec<crate::domain::task::TaskRelation>,
+                        >(relations_val.clone())
+                        {
+                            builder = builder.with_relations(relations);
+                        }
+                    }
+                }
+            }
+
+            Ok(builder.build())
         })?;
 
         let mut tasks = Vec::new();
@@ -305,38 +376,106 @@ impl TaskRepository for SqliteRepository {
         Ok(())
     }
 
+    fn add_tag(&self, id: String, tag: String) -> Result<(), Box<dyn Error>> {
+        let mut features = self.get_task_features(&id)?;
+        let tags_val = features
+            .entry("tags".to_string())
+            .or_insert(serde_json::json!([]));
+        if let Some(tags_array) = tags_val.as_array_mut() {
+            let tag_json = serde_json::json!(tag);
+            if !tags_array.contains(&tag_json) {
+                tags_array.push(tag_json);
+            }
+        }
+        self.save_task_features(&id, features)
+    }
+
+    fn remove_tag(&self, id: String, tag: String) -> Result<(), Box<dyn Error>> {
+        let mut features = self.get_task_features(&id)?;
+        if let Some(tags_val) = features.get_mut("tags") {
+            if let Some(tags_array) = tags_val.as_array_mut() {
+                tags_array.retain(|t| t.as_str() != Some(&tag));
+            }
+        }
+        self.save_task_features(&id, features)
+    }
+
+    fn add_relation(
+        &self,
+        id: String,
+        relation: crate::domain::task::TaskRelation,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut features = self.get_task_features(&id)?;
+        let relations_val = features
+            .entry("relations".to_string())
+            .or_insert(serde_json::json!([]));
+        if let Some(relations_array) = relations_val.as_array_mut() {
+            let rel_json = serde_json::to_value(&relation)?;
+            // Check if already exists
+            let exists = relations_array.iter().any(|r| {
+                r.get("target_id") == rel_json.get("target_id")
+                    && r.get("relation_type") == rel_json.get("relation_type")
+            });
+            if !exists {
+                relations_array.push(rel_json);
+            }
+        }
+        self.save_task_features(&id, features)
+    }
+
+    fn remove_relation(&self, id: String, target_id: String) -> Result<(), Box<dyn Error>> {
+        let mut features = self.get_task_features(&id)?;
+        if let Some(relations_val) = features.get_mut("relations") {
+            if let Some(relations_array) = relations_val.as_array_mut() {
+                relations_array
+                    .retain(|r| r.get("target_id").and_then(|v| v.as_str()) != Some(&target_id));
+            }
+        }
+        self.save_task_features(&id, features)
+    }
+
     fn upsert_from_external(&self, task: Task) -> Result<(), Box<dyn Error>> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
 
-        let source_str = match task.source {
+        let source_str = match task.source() {
             TaskSource::Jira => "Jira",
             TaskSource::Local => "Local",
         };
 
         // 1. Try to find existing task by external_id AND source
-        let existing_id: Option<String> = tx
+        let existing_data: Option<(String, Option<String>)> = tx
             .query_row(
-                "SELECT id FROM todo WHERE external_id = ? AND source = ?",
-                params![task.external_id, source_str],
-                |row| row.get(0),
+                "SELECT id, features FROM todo WHERE external_id = ? AND source = ?",
+                params![task.external_id(), source_str],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .ok();
 
-        if let Some(id) = existing_id {
-            // 2. Update existing
+        if let Some((id, existing_features_json)) = existing_data {
+            // 2. Update existing - Merge features
+            let features_map: serde_json::Map<String, serde_json::Value> = existing_features_json
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+
+            // For now, we just overwrite title/desc/dates, but we keep other features like tags/relations
+            // In the future, we might want a more sophisticated merge
+
             debug!(
                 "Updating existing external task: {} (ID: {}, Source: {})",
-                task.title, id, source_str
+                task.title(),
+                id,
+                source_str
             );
             tx.execute(
-                "UPDATE todo SET title = ?, description = ?, completed = ?, start_date = ?, end_date = ? WHERE id = ?",
+                "UPDATE todo SET title = ?, description = ?, completed = ?, start_date = ?, end_date = ?, features = ? WHERE id = ?",
                 params![
-                    task.title,
-                    task.description,
-                    if task.completed { 1 } else { 0 },
-                    task.start_date.map(|d| d.to_rfc3339()),
-                    task.end_date.map(|d| d.to_rfc3339()),
+                    task.title(),
+                    task.description(),
+                    if task.is_completed() { 1 } else { 0 },
+                    task.start_date().map(|d| d.to_rfc3339()),
+                    task.end_date().map(|d| d.to_rfc3339()),
+                    serde_json::to_string(&features_map)?,
                     id
                 ],
             )?;
@@ -344,26 +483,32 @@ impl TaskRepository for SqliteRepository {
             // 3. Insert new
             debug!(
                 "Inserting new external task: {} (Source: {})",
-                task.title, source_str
+                task.title(),
+                source_str
             );
             let id = Uuid::new_v4().to_string();
             let max_pos: i64 =
                 tx.query_row("SELECT IFNULL(MAX(position), 0) FROM todo", [], |row| {
                     row.get(0)
                 })?;
+
+            // Serialize features if any
+            let features_map = serde_json::Map::new(); // External tasks start with no extra features for now
+
             tx.execute(
-                "INSERT INTO todo (id, external_id, source, title, description, important, completed, start_date, end_date, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO todo (id, external_id, source, title, description, important, completed, start_date, end_date, position, features) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     id,
-                    task.external_id,
+                    task.external_id(),
                     source_str,
-                    task.title,
-                    task.description,
-                    if task.important { 1 } else { 0 },
-                    if task.completed { 1 } else { 0 },
-                    task.start_date.map(|d| d.to_rfc3339()),
-                    task.end_date.map(|d| d.to_rfc3339()),
-                    max_pos + 1
+                    task.title(),
+                    task.description(),
+                    if task.is_important() { 1 } else { 0 },
+                    if task.is_completed() { 1 } else { 0 },
+                    task.start_date().map(|d| d.to_rfc3339()),
+                    task.end_date().map(|d| d.to_rfc3339()),
+                    max_pos + 1,
+                    serde_json::to_string(&features_map)?
                 ],
             )?;
         }

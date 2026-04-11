@@ -12,7 +12,7 @@ use ratatui::{
 pub fn draw_sidebar(f: &mut Frame, app: &mut App, area: Rect, colors: &Colors) {
     let all_tasks = app.task_service.get_all_tasks().unwrap_or_default();
     let total = all_tasks.len();
-    let completed = all_tasks.iter().filter(|t| t.completed).count();
+    let completed = all_tasks.iter().filter(|t| t.is_completed()).count();
     let now = Local::now();
 
     let stats = vec![

@@ -45,14 +45,15 @@ pub fn draw_card_item(f: &mut Frame, task: &Task, area: Rect, colors: &Colors, i
         .split(inner_area);
 
     // Top: Title and Description
-    let status_icon = if task.completed { "⬢" } else { "⬡" };
-    let icon_style = if task.completed {
+    let completed = task.is_completed();
+    let status_icon = if completed { "⬢" } else { "⬡" };
+    let icon_style = if completed {
         Style::default().fg(colors.dim_text)
     } else {
         Style::default().fg(colors.accent)
     };
 
-    let title_style = if task.completed {
+    let title_style = if completed {
         Style::default()
             .fg(colors.dim_text)
             .add_modifier(Modifier::DIM)
@@ -64,17 +65,14 @@ pub fn draw_card_item(f: &mut Frame, task: &Task, area: Rect, colors: &Colors, i
 
     let top_line = Line::from(vec![
         Span::styled(format!("{} ", status_icon), icon_style),
-        Span::styled(task.title.clone(), title_style),
+        Span::styled(task.title(), title_style),
         Span::styled(" - ", Style::default().fg(colors.dim_text)),
-        Span::styled(
-            task.description.clone(),
-            Style::default().fg(colors.dim_text),
-        ),
+        Span::styled(task.description(), Style::default().fg(colors.dim_text)),
     ]);
     f.render_widget(Paragraph::new(top_line), chunks[0]);
 
     // Bottom: Days counter
-    let date_str = match (task.start_date, task.end_date) {
+    let date_str = match (task.start_date(), task.end_date()) {
         (Some(s), Some(e)) => {
             let today = Local::now().date_naive();
             let start = s.with_timezone(&Local).date_naive();

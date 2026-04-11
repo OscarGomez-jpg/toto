@@ -1,6 +1,6 @@
 use crate::adapters::tui::app::App;
 use crate::adapters::tui::widgets::colors::Colors;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -13,7 +13,7 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
     let tasks = app.get_filtered_items();
     let tasks_with_dates: Vec<_> = tasks
         .iter()
-        .filter(|t| t.start_date.is_some() || t.end_date.is_some())
+        .filter(|t| t.start_date().is_some() || t.end_date().is_some())
         .collect();
 
     if tasks_with_dates.is_empty() {
@@ -29,15 +29,15 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
     }
 
     // Find overall date range
-    let mut min_date = tasks_with_dates
+    let mut min_date: DateTime<Utc> = tasks_with_dates
         .iter()
-        .filter_map(|t| t.start_date.or(t.end_date))
+        .filter_map(|t| t.start_date().or(t.end_date()))
         .min()
         .unwrap_or_else(Utc::now);
 
-    let mut max_date = tasks_with_dates
+    let mut max_date: DateTime<Utc> = tasks_with_dates
         .iter()
-        .filter_map(|t| t.end_date.or(t.start_date))
+        .filter_map(|t| t.end_date().or(t.start_date()))
         .max()
         .unwrap_or_else(Utc::now);
 
@@ -108,14 +108,15 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
     ])));
 
     for item in tasks {
-        let mut label = item.title.clone();
+        let mut label = item.title();
         if label.len() > label_width {
             label.truncate(label_width - 3);
             label.push_str("...");
         }
+        let completed = item.is_completed();
         let label_span = Span::styled(
             format!("{: <width$}", label, width = label_width),
-            Style::default().fg(if item.completed {
+            Style::default().fg(if completed {
                 colors.dim_text
             } else {
                 colors.primary_text
@@ -124,7 +125,7 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
 
         let mut spans = vec![label_span, Span::raw(" │ ")];
 
-        match (item.start_date, item.end_date) {
+        match (item.start_date(), item.end_date()) {
             (Some(start), Some(end)) => {
                 let start_offset = (start - min_date).num_days().max(0);
                 let duration = (end - start).num_days().max(1);
@@ -138,9 +139,9 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
                     spans.push(Span::raw(" "));
                 }
 
-                let bar_color = if item.completed {
+                let bar_color = if completed {
                     colors.dim_text
-                } else if item.important {
+                } else if item.is_important() {
                     colors.alert
                 } else {
                     colors.accent

@@ -32,7 +32,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .arg(arg!(-r --remove <ID> "Remove a todo by ID").required(false))
         .arg(arg!(-c --done <ID> "Toggle completion status of a todo").required(false))
         .arg(arg!(-i --important <ID> "Toggle importance of a todo").required(false))
-        .arg(arg!(-e --edit <ID_TITLE> "Edit a todo title (format: 'ID:New Title')").required(false))
+        .arg(
+            arg!(-e --edit <ID_TITLE> "Edit a todo title (format: 'ID:New Title')").required(false),
+        )
         .arg(arg!(--start <DATE> "Start date (YYYY-MM-DD)").required(false))
         .arg(arg!(--end <DATE> "End date (YYYY-MM-DD)").required(false))
         .arg(
@@ -77,7 +79,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     if let Some(title) = matches.get_one::<String>("add") {
-        let description = matches.get_one::<String>("desc").cloned().unwrap_or_default();
+        let description = matches
+            .get_one::<String>("desc")
+            .cloned()
+            .unwrap_or_default();
         task_service.add_task(title.to_owned(), description, start_date, end_date)?;
         println!("Added: {}", title);
         performed_action = true;
@@ -103,7 +108,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(id_title) = matches.get_one::<String>("edit") {
         if let Some((id_str, title)) = id_title.split_once(':') {
-            let description = matches.get_one::<String>("desc").cloned().unwrap_or_default();
+            let description = matches
+                .get_one::<String>("desc")
+                .cloned()
+                .unwrap_or_default();
             task_service.update_task(
                 id_str.trim().to_string(),
                 title.trim().to_string(),
@@ -140,14 +148,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(items.len());
 
         for item in items.iter().take(limit) {
-            let status = if item.completed { "[X]" } else { "[ ]" };
-            let important = if item.important { "!" } else { " " };
+            let status = if item.is_completed() { "[X]" } else { "[ ]" };
+            let important = if item.is_important() { "!" } else { " " };
             let short_id = if item.id.len() > 4 {
                 &item.id[..4]
             } else {
                 &item.id
             };
-            println!("{} {} {}: {} - {}", important, status, short_id, item.title, item.description);
+            println!(
+                "{} {} {}: {} - {}",
+                important,
+                status,
+                short_id,
+                item.title(),
+                item.description()
+            );
         }
         performed_action = true;
     }

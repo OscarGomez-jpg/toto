@@ -1,5 +1,5 @@
 use crate::adapters::tui::config::JiraConfig;
-use crate::domain::task::{Task, TaskSource};
+use crate::domain::task::{Task, TaskBuilder, TaskSource};
 use base64::{engine::general_purpose, Engine as _};
 use log::{debug, error, info};
 use reqwest::blocking::Client;
@@ -90,22 +90,24 @@ impl JiraAdapter {
                     let summary = fields["summary"].as_str().unwrap_or_default().to_string();
                     let status_name = fields["status"]["name"].as_str().unwrap_or_default();
 
-                    let mut task = Task::new(Uuid::new_v4().to_string(), key.clone(), summary);
-                    task.external_id = Some(key);
-                    task.source = TaskSource::Jira;
-                    task.completed = status_name == "Done" || status_name == "Closed";
+                    let is_completed = status_name == "Done" || status_name == "Closed";
+                    let task_builder = TaskBuilder::new(Uuid::new_v4().to_string())
+                        .with_metadata(key.clone(), summary)
+                        .with_status(is_completed, false)
+                        .with_external(Some(key), TaskSource::Jira);
 
                     // Parse due date if available
+                    let mut end_date = None;
                     if let Some(due_str) = fields["duedate"].as_str() {
                         // duedate is usually "YYYY-MM-DD"
                         if let Ok(naive_date) =
                             chrono::NaiveDate::parse_from_str(due_str, "%Y-%m-%d")
                         {
-                            let datetime = naive_date.and_hms_opt(0, 0, 0).unwrap().and_utc();
-                            task.end_date = Some(datetime);
+                            end_date = Some(naive_date.and_hms_opt(0, 0, 0).unwrap().and_utc());
                         }
                     }
 
+                    let task = task_builder.with_schedule(None, end_date).build();
                     all_tasks.push(task);
                 }
             }

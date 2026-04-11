@@ -3,12 +3,17 @@ use std::error::Error;
 
 use chrono::{DateTime, Utc};
 
+use crate::domain::command::{Command, CommandResult};
+
 /// Defines the primary interface for interacting with the task service.
-/// 
+///
 /// This port is used by inbound adapters (like the TUI or CLI) to perform
 /// actions on the domain.
 #[cfg_attr(test, mockall::automock)]
 pub trait TaskServicePort: Send + Sync {
+    /// Executes a command.
+    fn execute_command(&self, command: Box<dyn Command>) -> Result<CommandResult, Box<dyn Error>>;
+
     /// Adds a new task with optional start and end dates.
     fn add_task(
         &self,
@@ -46,6 +51,26 @@ pub trait TaskServicePort: Send + Sync {
     /// Moves a task up or down in the list order.
     fn move_task(&self, id: String, delta: i32) -> Result<(), Box<dyn Error>>;
 
+    /// Adds a tag to a task.
+    fn add_tag(&self, id: String, tag: String) -> Result<(), Box<dyn Error>>;
+
+    /// Removes a tag from a task.
+    fn remove_tag(&self, id: String, tag: String) -> Result<(), Box<dyn Error>>;
+
+    /// Relates two tasks.
+    fn add_relation(
+        &self,
+        source_id: String,
+        target_id: String,
+        relation_type: crate::domain::task::RelationType,
+    ) -> Result<(), Box<dyn Error>>;
+
+    /// Removes a relation between two tasks.
+    fn remove_relation(&self, source_id: String, target_id: String) -> Result<(), Box<dyn Error>>;
+
     /// Synchronizes tasks from an external Jira project based on configuration.
-    fn sync_jira(&self, config: crate::adapters::tui::config::JiraConfig) -> Result<String, Box<dyn Error>>;
+    fn sync_jira(
+        &self,
+        config: crate::adapters::tui::config::JiraConfig,
+    ) -> Result<String, Box<dyn Error>>;
 }

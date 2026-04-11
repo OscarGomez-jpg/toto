@@ -21,6 +21,10 @@ impl TaskService {
 }
 
 impl TaskServicePort for TaskService {
+    fn execute_command(&self, command: Box<dyn crate::domain::command::Command>) -> Result<crate::domain::command::CommandResult, Box<dyn Error>> {
+        command.execute(self)
+    }
+
     fn add_task(
         &self,
         title: String,
@@ -29,9 +33,10 @@ impl TaskServicePort for TaskService {
         end_date: Option<DateTime<Utc>>,
     ) -> Result<String, Box<dyn Error>> {
         // Domain validation
-        let mut temp_task = Task::new("temp".to_string(), title.clone(), description.clone());
-        temp_task.start_date = start_date;
-        temp_task.end_date = end_date;
+        let temp_task = crate::domain::task::TaskBuilder::new("temp".to_string())
+            .with_metadata(title.clone(), description.clone())
+            .with_schedule(start_date, end_date)
+            .build();
         
         if !temp_task.is_valid_range() {
             return Err("Invalid date range: start date must be before end date".into());
@@ -60,9 +65,10 @@ impl TaskServicePort for TaskService {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
     ) -> Result<(), Box<dyn Error>> {
-        let mut temp_task = Task::new(id.clone(), title.clone(), description.clone());
-        temp_task.start_date = start_date;
-        temp_task.end_date = end_date;
+        let temp_task = crate::domain::task::TaskBuilder::new(id.clone())
+            .with_metadata(title.clone(), description.clone())
+            .with_schedule(start_date, end_date)
+            .build();
         
         if !temp_task.is_valid_range() {
             return Err("Invalid date range: start date must be before end date".into());
@@ -89,6 +95,53 @@ impl TaskServicePort for TaskService {
         self.repository.move_task(id, delta)
     }
 
+    fn add_tag(&self, id: String, tag: String) -> Result<(), Box<dyn Error>> {
+        self.repository.add_tag(id, tag)
+    }
+
+    fn remove_tag(&self, id: String, tag: String) -> Result<(), Box<dyn Error>> {
+        self.repository.remove_tag(id, tag)
+    }
+
+    fn add_relation(
+        &self,
+        source_id: String,
+        target_id: String,
+        relation_type: crate::domain::task::RelationType,
+    ) -> Result<(), Box<dyn Error>> {
+        use crate::domain::task::{TaskRelation, RelationType};
+        
+        // Add direct relation
+        self.repository.add_relation(source_id.clone(), TaskRelation {
+            target_id: target_id.clone(),
+            relation_type: relation_type.clone(),
+        })?;
+
+        // Add inverse relation
+        let inverse_type = match relation_type {
+            RelationType::Blocks => RelationType::BlockedBy,
+            RelationType::BlockedBy => RelationType::Blocks,
+            RelationType::Subtask => RelationType::Parent,
+            RelationType::Parent => RelationType::Subtask,
+            RelationType::RelatedTo => RelationType::RelatedTo,
+        };
+
+        self.repository.add_relation(target_id, TaskRelation {
+            target_id: source_id,
+            relation_type: inverse_type,
+        })
+    }
+
+    fn remove_relation(
+        &self,
+        source_id: String,
+        target_id: String,
+    ) -> Result<(), Box<dyn Error>> {
+        // Remove both directions
+        self.repository.remove_relation(source_id.clone(), target_id.clone())?;
+        self.repository.remove_relation(target_id, source_id)
+    }
+
     fn sync_jira(&self, config: crate::adapters::tui::config::JiraConfig) -> Result<String, Box<dyn Error>> {
         let jira_adapter = crate::adapters::jira::JiraAdapter::new(config);
         let jira_tasks = jira_adapter.fetch_tasks()?;
@@ -106,7 +159,10 @@ impl TaskServicePort for TaskService {
 mod tests {
     use super::*;
     use crate::ports::outbound::MockTaskRepository;
+    use crate::domain::command::{AddTaskCommand, CommandResult};
+    use crate::domain::task::RelationType;
     use mockall::predicate::*;
+    use mockall::predicate;
 
     #[test]
     fn test_add_task_valid() {
@@ -121,6 +177,62 @@ mod tests {
         
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "1");
+    }
+
+    #[test]
+    fn test_execute_command_add_task() {
+        let mut mock_repo = MockTaskRepository::new();
+        mock_repo.expect_add()
+            .returning(|_, _, _, _| Ok("cmd_id".to_string()));
+
+        let service = TaskService::new(Arc::new(mock_repo));
+        let cmd = Box::new(AddTaskCommand {
+            title: "cmd title".to_string(),
+            description: "cmd desc".to_string(),
+            start_date: None,
+            end_date: None,
+        });
+
+        let result = service.execute_command(cmd).unwrap();
+        assert_eq!(result, CommandResult::Id("cmd_id".to_string()));
+    }
+
+    #[test]
+    fn test_add_tag() {
+        let mut mock_repo = MockTaskRepository::new();
+        mock_repo.expect_add_tag()
+            .with(eq("1".to_string()), eq("rust".to_string()))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let service = TaskService::new(Arc::new(mock_repo));
+        let result = service.add_tag("1".to_string(), "rust".to_string());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_add_relation_two_way() {
+        let mut mock_repo = MockTaskRepository::new();
+        
+        // Expect direct relation
+        mock_repo.expect_add_relation()
+            .with(eq("1".to_string()), predicate::function(|r: &crate::domain::task::TaskRelation| {
+                r.target_id == "2" && r.relation_type == RelationType::Blocks
+            }))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        // Expect inverse relation
+        mock_repo.expect_add_relation()
+            .with(eq("2".to_string()), predicate::function(|r: &crate::domain::task::TaskRelation| {
+                r.target_id == "1" && r.relation_type == RelationType::BlockedBy
+            }))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let service = TaskService::new(Arc::new(mock_repo));
+        let result = service.add_relation("1".to_string(), "2".to_string(), RelationType::Blocks);
+        assert!(result.is_ok());
     }
 
     #[test]

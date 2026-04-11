@@ -68,15 +68,15 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
                 if i < items.len() {
                     app.current_screen = CurrentScreen::Editing;
                     app.editing_id = Some(items[i].id.clone());
-                    app.title_input = items[i].title.clone();
-                    app.description_input = items[i].description.clone();
+                    app.title_input = items[i].title();
+                    app.description_input = items[i].description();
                     app.start_date_input = items[i]
-                        .start_date
-                        .map(|d| d.format("%Y-%m-%d").to_string())
+                        .start_date()
+                        .map(|d: chrono::DateTime<chrono::Utc>| d.format("%Y-%m-%d").to_string())
                         .unwrap_or_default();
                     app.end_date_input = items[i]
-                        .end_date
-                        .map(|d| d.format("%Y-%m-%d").to_string())
+                        .end_date()
+                        .map(|d: chrono::DateTime<chrono::Utc>| d.format("%Y-%m-%d").to_string())
                         .unwrap_or_default();
                     app.input_focus = InputFocus::Title;
                     app.sync_selected_date();
