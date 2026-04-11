@@ -23,12 +23,13 @@ impl TaskService {
 impl TaskServicePort for TaskService {
     fn add_task(
         &self,
-        content: String,
+        title: String,
+        description: String,
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
     ) -> Result<String, Box<dyn Error>> {
         // Domain validation
-        let mut temp_task = Task::new("temp".to_string(), content.clone());
+        let mut temp_task = Task::new("temp".to_string(), title.clone(), description.clone());
         temp_task.start_date = start_date;
         temp_task.end_date = end_date;
         
@@ -36,7 +37,7 @@ impl TaskServicePort for TaskService {
             return Err("Invalid date range: start date must be before end date".into());
         }
 
-        self.repository.add(content, start_date, end_date)
+        self.repository.add(title, description, start_date, end_date)
     }
 
     fn get_all_tasks(&self) -> Result<Vec<Task>, Box<dyn Error>> {
@@ -51,14 +52,15 @@ impl TaskServicePort for TaskService {
         self.repository.toggle_important(id)
     }
 
-    fn update_task_content(
+    fn update_task(
         &self,
         id: String,
-        content: String,
+        title: String,
+        description: String,
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
     ) -> Result<(), Box<dyn Error>> {
-        let mut temp_task = Task::new(id.clone(), content.clone());
+        let mut temp_task = Task::new(id.clone(), title.clone(), description.clone());
         temp_task.start_date = start_date;
         temp_task.end_date = end_date;
         
@@ -66,7 +68,7 @@ impl TaskServicePort for TaskService {
             return Err("Invalid date range: start date must be before end date".into());
         }
 
-        self.repository.update_content(id, content, start_date, end_date)
+        self.repository.update_task(id, title, description, start_date, end_date)
     }
 
     fn remove_task(&self, id: String) -> Result<String, Box<dyn Error>> {
@@ -110,12 +112,12 @@ mod tests {
     fn test_add_task_valid() {
         let mut mock_repo = MockTaskRepository::new();
         mock_repo.expect_add()
-            .with(eq("test".to_string()), eq(None), eq(None))
+            .with(eq("title".to_string()), eq("description".to_string()), eq(None), eq(None))
             .times(1)
-            .returning(|_, _, _| Ok("1".to_string()));
+            .returning(|_, _, _, _| Ok("1".to_string()));
 
         let service = TaskService::new(Arc::new(mock_repo));
-        let result = service.add_task("test".to_string(), None, None);
+        let result = service.add_task("title".to_string(), "description".to_string(), None, None);
         
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "1");
@@ -130,7 +132,7 @@ mod tests {
         let start = Some(now);
         let end = Some(now - chrono::Duration::days(1));
         
-        let result = service.add_task("test".to_string(), start, end);
+        let result = service.add_task("title".to_string(), "description".to_string(), start, end);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid date range"));
     }

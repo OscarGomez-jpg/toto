@@ -26,12 +26,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting toto...");
 
     let matches = command!()
-        .arg(arg!(-a --add <CONTENT> "Add a new todo").required(false))
+        .arg(arg!(-a --add <TITLE> "Add a new todo title").required(false))
+        .arg(arg!(-d --desc <DESCRIPTION> "Task description").required(false))
         .arg(arg!(-l --list [LIMIT] "List todos").required(false))
         .arg(arg!(-r --remove <ID> "Remove a todo by ID").required(false))
         .arg(arg!(-c --done <ID> "Toggle completion status of a todo").required(false))
         .arg(arg!(-i --important <ID> "Toggle importance of a todo").required(false))
-        .arg(arg!(-e --edit <ID_CONTENT> "Edit a todo (format: 'ID:New Content')").required(false))
+        .arg(arg!(-e --edit <ID_TITLE> "Edit a todo title (format: 'ID:New Title')").required(false))
         .arg(arg!(--start <DATE> "Start date (YYYY-MM-DD)").required(false))
         .arg(arg!(--end <DATE> "End date (YYYY-MM-DD)").required(false))
         .arg(
@@ -75,9 +76,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|d| d.with_timezone(&chrono::Utc))
     });
 
-    if let Some(content) = matches.get_one::<String>("add") {
-        task_service.add_task(content.to_owned(), start_date, end_date)?;
-        println!("Added: {}", content);
+    if let Some(title) = matches.get_one::<String>("add") {
+        let description = matches.get_one::<String>("desc").cloned().unwrap_or_default();
+        task_service.add_task(title.to_owned(), description, start_date, end_date)?;
+        println!("Added: {}", title);
         performed_action = true;
     }
 
@@ -99,18 +101,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         performed_action = true;
     }
 
-    if let Some(id_content) = matches.get_one::<String>("edit") {
-        if let Some((id_str, content)) = id_content.split_once(':') {
-            task_service.update_task_content(
+    if let Some(id_title) = matches.get_one::<String>("edit") {
+        if let Some((id_str, title)) = id_title.split_once(':') {
+            let description = matches.get_one::<String>("desc").cloned().unwrap_or_default();
+            task_service.update_task(
                 id_str.trim().to_string(),
-                content.trim().to_string(),
+                title.trim().to_string(),
+                description,
                 start_date,
                 end_date,
             )?;
-            println!("Updated task {} content", id_str);
+            println!("Updated task {} title", id_str);
             performed_action = true;
         } else {
-            println!("Invalid edit format. Use 'ID:New Content'");
+            println!("Invalid edit format. Use 'ID:New Title'");
             return Ok(());
         }
     }
@@ -143,7 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 &item.id
             };
-            println!("{} {} {}: {}", important, status, short_id, item.content);
+            println!("{} {} {}: {} - {}", important, status, short_id, item.title, item.description);
         }
         performed_action = true;
     }

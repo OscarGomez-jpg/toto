@@ -12,7 +12,8 @@ pub trait TaskServicePort: Send + Sync {
     /// Adds a new task with optional start and end dates.
     fn add_task(
         &self,
-        content: String,
+        title: String,
+        description: String,
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
     ) -> Result<String, Box<dyn Error>>;
@@ -27,10 +28,11 @@ pub trait TaskServicePort: Send + Sync {
     fn toggle_important(&self, id: String) -> Result<(), Box<dyn Error>>;
 
     /// Updates the content and dates of an existing task.
-    fn update_task_content(
+    fn update_task(
         &self,
         id: String,
-        content: String,
+        title: String,
+        description: String,
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
     ) -> Result<(), Box<dyn Error>>;

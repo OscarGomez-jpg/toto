@@ -13,13 +13,14 @@ mod integration_tests {
 
         // 1. Add task
         let id = service
-            .add_task("Integration test".to_string(), None, None)
+            .add_task("Integration test".to_string(), "Description".to_string(), None, None)
             .unwrap();
 
         // 2. Verify it exists
         let tasks = service.get_all_tasks().unwrap();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].content, "Integration test");
+        assert_eq!(tasks[0].title, "Integration test");
+        assert_eq!(tasks[0].description, "Description");
         assert_eq!(tasks[0].id, id);
 
         // 3. Toggle completed
@@ -29,10 +30,11 @@ mod integration_tests {
 
         // 4. Update content
         service
-            .update_task_content(id.clone(), "Updated".to_string(), None, None)
+            .update_task(id.clone(), "Updated".to_string(), "New description".to_string(), None, None)
             .unwrap();
         let tasks = service.get_all_tasks().unwrap();
-        assert_eq!(tasks[0].content, "Updated");
+        assert_eq!(tasks[0].title, "Updated");
+        assert_eq!(tasks[0].description, "New description");
 
         // 5. Remove task
         service.remove_task(id).unwrap();

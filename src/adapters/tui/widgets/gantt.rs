@@ -108,7 +108,7 @@ pub fn draw_gantt_chart(f: &mut Frame, app: &mut App, area: Rect, colors: &Color
     ])));
 
     for item in tasks {
-        let mut label = item.content.clone();
+        let mut label = item.title.clone();
         if label.len() > label_width {
             label.truncate(label_width - 3);
             label.push_str("...");

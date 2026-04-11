@@ -18,8 +18,10 @@ pub struct Task {
     pub external_id: Option<String>,
     /// Where this task originated from.
     pub source: TaskSource,
+    /// The title of the task.
+    pub title: String,
     /// The main description or content of the task.
-    pub content: String,
+    pub description: String,
     /// Whether the task is marked as important/prioritized.
     pub important: bool,
     /// Completion status.
@@ -32,12 +34,13 @@ pub struct Task {
 
 impl Task {
     /// Creates a new local task with default values.
-    pub fn new(id: String, content: String) -> Self {
+    pub fn new(id: String, title: String, description: String) -> Self {
         Self {
             id,
             external_id: None,
             source: TaskSource::Local,
-            content,
+            title,
+            description,
             important: false,
             completed: false,
             start_date: None,
@@ -61,9 +64,10 @@ mod tests {
 
     #[test]
     fn test_task_new() {
-        let task = Task::new("1".to_string(), "test".to_string());
+        let task = Task::new("1".to_string(), "title".to_string(), "test".to_string());
         assert_eq!(task.id, "1");
-        assert_eq!(task.content, "test");
+        assert_eq!(task.title, "title");
+        assert_eq!(task.description, "test");
         assert!(!task.completed);
         assert!(!task.important);
         assert_eq!(task.source, TaskSource::Local);
@@ -71,7 +75,7 @@ mod tests {
 
     #[test]
     fn test_is_valid_range() {
-        let mut task = Task::new("1".to_string(), "test".to_string());
+        let mut task = Task::new("1".to_string(), "title".to_string(), "test".to_string());
         assert!(task.is_valid_range());
 
         let now = Utc::now();

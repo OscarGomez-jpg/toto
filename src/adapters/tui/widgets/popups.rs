@@ -226,29 +226,50 @@ fn draw_input_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
     let left_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(1),
+            Constraint::Length(3), // Title
+            Constraint::Min(3),    // Description
+            Constraint::Length(3), // Start Date
+            Constraint::Length(3), // End Date
+            Constraint::Length(1), // Help
         ])
         .split(outer_layout[0]);
 
-    // Content Field
-    let content_block = Block::default()
+    // Title Field
+    let title_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Task Title ")
+        .border_style(if app.input_focus == InputFocus::Title {
+            Style::default().fg(colors.accent)
+        } else {
+            Style::default().fg(colors.dim_text)
+        });
+    f.render_widget(
+        Paragraph::new(app.title_input.as_str()).block(title_block),
+        left_chunks[0],
+    );
+    if app.input_focus == InputFocus::Title {
+        f.set_cursor_position((
+            left_chunks[0].x + 1 + app.title_input.graphemes(true).count() as u16,
+            left_chunks[0].y + 1,
+        ));
+    }
+
+    // Description Field
+    let description_block = Block::default()
         .borders(Borders::ALL)
         .title(" Task Description ")
-        .border_style(if app.input_focus == InputFocus::Content {
+        .border_style(if app.input_focus == InputFocus::Description {
             Style::default().fg(colors.accent)
         } else {
             Style::default().fg(colors.dim_text)
         });
 
-    let inner_w = left_chunks[0].width.saturating_sub(2);
+    let inner_w = left_chunks[1].width.saturating_sub(2);
     let mut cursor_y = 0;
     let mut cursor_x = 0;
 
     if inner_w > 0 {
-        let full_text = format!("> {}", app.input);
+        let full_text = format!("> {}", app.description_input);
         let mut current_line_width = 0;
 
         for word in full_text.split_inclusive(' ') {
@@ -286,7 +307,7 @@ fn draw_input_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
         }
     }
 
-    let max_h = left_chunks[0].height.saturating_sub(2);
+    let max_h = left_chunks[1].height.saturating_sub(2);
     let scroll = if cursor_y >= max_h {
         cursor_y - max_h + 1
     } else {
@@ -294,17 +315,17 @@ fn draw_input_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
     };
 
     f.render_widget(
-        Paragraph::new(format!("> {}", app.input))
-            .block(content_block)
+        Paragraph::new(format!("> {}", app.description_input))
+            .block(description_block)
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0)),
-        left_chunks[0],
+        left_chunks[1],
     );
 
-    if app.input_focus == InputFocus::Content && inner_w > 0 {
+    if app.input_focus == InputFocus::Description && inner_w > 0 {
         f.set_cursor_position((
-            left_chunks[0].x + 1 + cursor_x,
-            left_chunks[0].y + 1 + cursor_y.saturating_sub(scroll),
+            left_chunks[1].x + 1 + cursor_x,
+            left_chunks[1].y + 1 + cursor_y.saturating_sub(scroll),
         ));
     }
 
@@ -319,12 +340,12 @@ fn draw_input_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
         });
     f.render_widget(
         Paragraph::new(app.start_date_input.as_str()).block(start_block),
-        left_chunks[1],
+        left_chunks[2],
     );
     if app.input_focus == InputFocus::StartDate {
         f.set_cursor_position((
-            left_chunks[1].x + 1 + app.start_date_input.graphemes(true).count() as u16,
-            left_chunks[1].y + 1,
+            left_chunks[2].x + 1 + app.start_date_input.graphemes(true).count() as u16,
+            left_chunks[2].y + 1,
         ));
     }
 
@@ -339,12 +360,12 @@ fn draw_input_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
         });
     f.render_widget(
         Paragraph::new(app.end_date_input.as_str()).block(end_block),
-        left_chunks[2],
+        left_chunks[3],
     );
     if app.input_focus == InputFocus::EndDate {
         f.set_cursor_position((
-            left_chunks[2].x + 1 + app.end_date_input.graphemes(true).count() as u16,
-            left_chunks[2].y + 1,
+            left_chunks[3].x + 1 + app.end_date_input.graphemes(true).count() as u16,
+            left_chunks[3].y + 1,
         ));
     }
 
@@ -352,7 +373,7 @@ fn draw_input_popup(f: &mut Frame, app: &mut App, colors: &Colors) {
         Paragraph::new("Tab: Next Field | Enter: Save | Esc: Cancel")
             .style(Style::default().fg(colors.dim_text))
             .alignment(Alignment::Center),
-        left_chunks[3],
+        left_chunks[4],
     );
 
     // Calendar

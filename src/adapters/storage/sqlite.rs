@@ -44,7 +44,8 @@ impl SqliteRepository {
                 id TEXT PRIMARY KEY,
                 external_id TEXT,
                 source TEXT DEFAULT 'Local',
-                content TEXT NOT NULL,
+                title TEXT DEFAULT '',
+                description TEXT DEFAULT '',
                 important INTEGER DEFAULT 0,
                 completed INTEGER DEFAULT 0,
                 start_date TEXT,
@@ -60,6 +61,18 @@ impl SqliteRepository {
             .query_map([], |row| row.get(0))?
             .collect::<Result<Vec<_>, _>>()?;
 
+        if !columns.contains(&"title".to_string()) {
+            info!("Adding 'title' column to todo table");
+            conn.execute("ALTER TABLE todo ADD COLUMN title TEXT DEFAULT ''", [])?;
+        }
+        if columns.contains(&"content".to_string()) && !columns.contains(&"description".to_string()) {
+            info!("Renaming 'content' to 'description'");
+            conn.execute("ALTER TABLE todo RENAME COLUMN content TO description", [])?;
+        }
+        if !columns.contains(&"description".to_string()) && !columns.contains(&"content".to_string()) {
+            info!("Adding 'description' column to todo table");
+            conn.execute("ALTER TABLE todo ADD COLUMN description TEXT DEFAULT ''", [])?;
+        }
         if !columns.contains(&"completed".to_string()) {
             info!("Adding 'completed' column to todo table");
             conn.execute(
@@ -119,11 +132,12 @@ impl SqliteRepository {
 impl TaskRepository for SqliteRepository {
     fn add(
         &self,
-        content: String,
+        title: String,
+        description: String,
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
     ) -> Result<String, Box<dyn Error>> {
-        debug!("Adding local task: {}", content);
+        debug!("Adding local task: {} - {}", title, description);
         let conn = self.conn.lock().unwrap();
         let id = Uuid::new_v4().to_string();
         let max_pos: i64 =
@@ -131,10 +145,11 @@ impl TaskRepository for SqliteRepository {
                 row.get(0)
             })?;
         conn.execute(
-            "INSERT INTO todo (id, content, position, start_date, end_date, source) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO todo (id, title, description, position, start_date, end_date, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
             params![
                 id,
-                content,
+                title,
+                description,
                 max_pos + 1,
                 start_date.map(|d| d.to_rfc3339()),
                 end_date.map(|d| d.to_rfc3339()),
@@ -146,14 +161,15 @@ impl TaskRepository for SqliteRepository {
 
     fn get_all(&self) -> Result<Vec<Task>, Box<dyn Error>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, content, important, completed, start_date, end_date, external_id, source FROM todo ORDER BY completed ASC, position DESC, id DESC")?;
+        let mut stmt = conn.prepare("SELECT id, title, description, important, completed, start_date, end_date, external_id, source FROM todo ORDER BY completed ASC, position DESC, id DESC")?;
         let todo_iter = stmt.query_map([], |row| {
             let id: String = row.get(0)?;
-            let content: String = row.get(1)?;
-            let start_date_str: Option<String> = row.get(4)?;
-            let end_date_str: Option<String> = row.get(5)?;
-            let external_id: Option<String> = row.get(6)?;
-            let source_str: String = row.get(7)?;
+            let title: String = row.get(1)?;
+            let description: String = row.get(2)?;
+            let start_date_str: Option<String> = row.get(5)?;
+            let end_date_str: Option<String> = row.get(6)?;
+            let external_id: Option<String> = row.get(7)?;
+            let source_str: String = row.get(8)?;
 
             let start_date = start_date_str.and_then(|s| {
                 DateTime::parse_from_rfc3339(&s)
@@ -171,9 +187,9 @@ impl TaskRepository for SqliteRepository {
                 _ => TaskSource::Local,
             };
 
-            let mut task = Task::new(id, content);
-            task.important = row.get::<_, i32>(2)? != 0;
-            task.completed = row.get::<_, i32>(3)? != 0;
+            let mut task = Task::new(id, title, description);
+            task.important = row.get::<_, i32>(3)? != 0;
+            task.completed = row.get::<_, i32>(4)? != 0;
             task.start_date = start_date;
             task.end_date = end_date;
             task.external_id = external_id;
@@ -209,19 +225,21 @@ impl TaskRepository for SqliteRepository {
         Ok(())
     }
 
-    fn update_content(
+    fn update_task(
         &self,
         id: String,
-        content: String,
+        title: String,
+        description: String,
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
     ) -> Result<(), Box<dyn Error>> {
-        debug!("Updating content for task: {}", id);
+        debug!("Updating task: {}", id);
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE todo SET content = ?, start_date = ?, end_date = ? WHERE id = ?",
+            "UPDATE todo SET title = ?, description = ?, start_date = ?, end_date = ? WHERE id = ?",
             params![
-                content,
+                title,
+                description,
                 start_date.map(|d| d.to_rfc3339()),
                 end_date.map(|d| d.to_rfc3339()),
                 id
@@ -309,12 +327,13 @@ impl TaskRepository for SqliteRepository {
             // 2. Update existing
             debug!(
                 "Updating existing external task: {} (ID: {}, Source: {})",
-                task.content, id, source_str
+                task.title, id, source_str
             );
             tx.execute(
-                "UPDATE todo SET content = ?, completed = ?, start_date = ?, end_date = ? WHERE id = ?",
+                "UPDATE todo SET title = ?, description = ?, completed = ?, start_date = ?, end_date = ? WHERE id = ?",
                 params![
-                    task.content,
+                    task.title,
+                    task.description,
                     if task.completed { 1 } else { 0 },
                     task.start_date.map(|d| d.to_rfc3339()),
                     task.end_date.map(|d| d.to_rfc3339()),
@@ -325,7 +344,7 @@ impl TaskRepository for SqliteRepository {
             // 3. Insert new
             debug!(
                 "Inserting new external task: {} (Source: {})",
-                task.content, source_str
+                task.title, source_str
             );
             let id = Uuid::new_v4().to_string();
             let max_pos: i64 =
@@ -333,12 +352,13 @@ impl TaskRepository for SqliteRepository {
                     row.get(0)
                 })?;
             tx.execute(
-                "INSERT INTO todo (id, external_id, source, content, important, completed, start_date, end_date, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO todo (id, external_id, source, title, description, important, completed, start_date, end_date, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     id,
                     task.external_id,
                     source_str,
-                    task.content,
+                    task.title,
+                    task.description,
                     if task.important { 1 } else { 0 },
                     if task.completed { 1 } else { 0 },
                     task.start_date.map(|d| d.to_rfc3339()),

@@ -16,6 +16,7 @@ use std::io;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
+//TODO: Implement the command pattern for the behavior
 pub fn run_tui(task_service: Arc<dyn TaskServicePort>) -> io::Result<()> {
     info!("Initializing TUI...");
     enable_raw_mode()?;
@@ -54,10 +55,11 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
         }
         Action::Add => {
             app.current_screen = CurrentScreen::Adding;
-            app.input.clear();
+            app.title_input.clear();
+            app.description_input.clear();
             app.start_date_input.clear();
             app.end_date_input.clear();
-            app.input_focus = InputFocus::Content;
+            app.input_focus = InputFocus::Title;
             app.sync_selected_date();
         }
         Action::Edit => {
@@ -66,7 +68,8 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
                 if i < items.len() {
                     app.current_screen = CurrentScreen::Editing;
                     app.editing_id = Some(items[i].id.clone());
-                    app.input = items[i].content.clone();
+                    app.title_input = items[i].title.clone();
+                    app.description_input = items[i].description.clone();
                     app.start_date_input = items[i]
                         .start_date
                         .map(|d| d.format("%Y-%m-%d").to_string())
@@ -75,7 +78,7 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
                         .end_date
                         .map(|d| d.format("%Y-%m-%d").to_string())
                         .unwrap_or_default();
-                    app.input_focus = InputFocus::Content;
+                    app.input_focus = InputFocus::Title;
                     app.sync_selected_date();
                 }
             }
@@ -169,11 +172,12 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
             }
             _ => {
                 app.current_screen = CurrentScreen::Main;
-                app.input.clear();
+                app.title_input.clear();
+                app.description_input.clear();
                 app.start_date_input.clear();
                 app.end_date_input.clear();
                 app.editing_id = None;
-                app.input_focus = InputFocus::Content;
+                app.input_focus = InputFocus::Title;
             }
         },
         Action::Enter => match app.current_screen {
@@ -208,18 +212,24 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
                 }
             }
             CurrentScreen::Adding => {
-                if !app.input.is_empty() {
-                    info!("Adding new task: {}", app.input);
+                if !app.title_input.is_empty() {
+                    info!("Adding new task: {}", app.title_input);
                     let start = app.parse_start_date();
                     let end = app.parse_end_date();
-                    if let Err(e) = app.task_service.add_task(app.input.clone(), start, end) {
+                    if let Err(e) = app.task_service.add_task(
+                        app.title_input.clone(),
+                        app.description_input.clone(),
+                        start,
+                        end,
+                    ) {
                         error!("Failed to add task: {:?}", e);
                     }
                     app.current_screen = CurrentScreen::Main;
-                    app.input.clear();
+                    app.title_input.clear();
+                    app.description_input.clear();
                     app.start_date_input.clear();
                     app.end_date_input.clear();
-                    app.input_focus = InputFocus::Content;
+                    app.input_focus = InputFocus::Title;
                 }
             }
             CurrentScreen::Editing => {
@@ -227,20 +237,22 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
                     info!("Updating task: {}", id);
                     let start = app.parse_start_date();
                     let end = app.parse_end_date();
-                    if let Err(e) = app.task_service.update_task_content(
+                    if let Err(e) = app.task_service.update_task(
                         id.clone(),
-                        app.input.clone(),
+                        app.title_input.clone(),
+                        app.description_input.clone(),
                         start,
                         end,
                     ) {
                         error!("Failed to update task: {:?}", e);
                     }
                     app.current_screen = CurrentScreen::Main;
-                    app.input.clear();
+                    app.title_input.clear();
+                    app.description_input.clear();
                     app.start_date_input.clear();
                     app.end_date_input.clear();
                     app.editing_id = None;
-                    app.input_focus = InputFocus::Content;
+                    app.input_focus = InputFocus::Title;
                 }
             }
             CurrentScreen::Main
@@ -304,7 +316,8 @@ fn run_app<B: Backend>(
                 let is_typing_focus = (app.current_screen == CurrentScreen::Adding
                     || app.current_screen == CurrentScreen::Editing
                     || app.current_screen == CurrentScreen::JiraConfiguring)
-                    && (app.input_focus == InputFocus::Content
+                    && (app.input_focus == InputFocus::Title
+                        || app.input_focus == InputFocus::Description
                         || app.input_focus == InputFocus::JiraDomain
                         || app.input_focus == InputFocus::JiraEmail
                         || app.input_focus == InputFocus::JiraToken
@@ -351,17 +364,31 @@ fn run_app<B: Backend>(
                         CurrentScreen::Adding
                         | CurrentScreen::Editing
                         | CurrentScreen::JiraConfiguring => match app.input_focus {
-                            InputFocus::Content => match key.code {
+                            InputFocus::Title => match key.code {
                                 KeyCode::Char('u')
                                     if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
                                 {
-                                    app.input.clear()
+                                    app.title_input.clear()
+                                }
+                                KeyCode::Char(c) => app.title_input.push(c),
+                                KeyCode::Backspace => {
+                                    app.title_input.pop();
+                                }
+                                _ => {}
+                            },
+                            InputFocus::Description => match key.code {
+                                KeyCode::Char('u')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    app.description_input.clear()
                                 }
                                 KeyCode::Char('w')
                                     if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
                                 {
-                                    let mut graphemes =
-                                        app.input.graphemes(true).collect::<Vec<&str>>();
+                                    let mut graphemes = app
+                                        .description_input
+                                        .graphemes(true)
+                                        .collect::<Vec<&str>>();
                                     while let Some(last) = graphemes.last() {
                                         if last.chars().all(|c| c.is_whitespace()) {
                                             graphemes.pop();
@@ -376,11 +403,11 @@ fn run_app<B: Backend>(
                                             break;
                                         }
                                     }
-                                    app.input = graphemes.concat();
+                                    app.description_input = graphemes.concat();
                                 }
-                                KeyCode::Char(c) => app.input.push(c),
+                                KeyCode::Char(c) => app.description_input.push(c),
                                 KeyCode::Backspace => {
-                                    app.input.pop();
+                                    app.description_input.pop();
                                 }
                                 _ => {}
                             },

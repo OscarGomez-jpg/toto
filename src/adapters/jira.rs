@@ -90,8 +90,7 @@ impl JiraAdapter {
                     let summary = fields["summary"].as_str().unwrap_or_default().to_string();
                     let status_name = fields["status"]["name"].as_str().unwrap_or_default();
 
-                    let mut task =
-                        Task::new(Uuid::new_v4().to_string(), format!("[{}] {}", key, summary));
+                    let mut task = Task::new(Uuid::new_v4().to_string(), key.clone(), summary);
                     task.external_id = Some(key);
                     task.source = TaskSource::Jira;
                     task.completed = status_name == "Done" || status_name == "Closed";

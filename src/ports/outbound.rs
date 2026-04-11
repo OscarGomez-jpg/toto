@@ -12,7 +12,8 @@ pub trait TaskRepository: Send + Sync {
     /// Persists a new local task.
     fn add(
         &self,
-        content: String,
+        title: String,
+        description: String,
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
     ) -> Result<String, Box<dyn Error>>;
@@ -27,10 +28,11 @@ pub trait TaskRepository: Send + Sync {
     fn toggle_important(&self, id: String) -> Result<(), Box<dyn Error>>;
 
     /// Updates the content and metadata of an existing task.
-    fn update_content(
+    fn update_task(
         &self,
         id: String,
-        content: String,
+        title: String,
+        description: String,
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
     ) -> Result<(), Box<dyn Error>>;

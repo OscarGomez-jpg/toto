@@ -19,7 +19,8 @@ pub enum CurrentScreen {
 
 #[derive(PartialEq)]
 pub enum InputFocus {
-    Content,
+    Title,
+    Description,
     StartDate,
     EndDate,
     JiraDomain,
@@ -68,7 +69,9 @@ pub struct App {
     pub current_screen: CurrentScreen,
     pub input_focus: InputFocus,
     pub list_state: ListState,
-    pub input: String,
+    pub list_offset: usize,
+    pub title_input: String,
+    pub description_input: String,
     pub start_date_input: String,
     pub end_date_input: String,
     pub search_query: String,
@@ -94,9 +97,11 @@ impl App {
         App {
             task_service,
             current_screen: CurrentScreen::Main,
-            input_focus: InputFocus::Content,
+            input_focus: InputFocus::Title,
             list_state,
-            input: String::new(),
+            list_offset: 0,
+            title_input: String::new(),
+            description_input: String::new(),
             start_date_input: String::new(),
             end_date_input: String::new(),
             search_query: String::new(),
@@ -123,7 +128,10 @@ impl App {
             let query = self.search_query.to_lowercase();
             items
                 .into_iter()
-                .filter(|item| item.content.to_lowercase().contains(&query))
+                .filter(|item| {
+                    item.title.to_lowercase().contains(&query)
+                        || item.description.to_lowercase().contains(&query)
+                })
                 .collect()
         }
     }
@@ -261,9 +269,10 @@ impl App {
 
     pub fn next_field(&mut self) {
         self.input_focus = match self.input_focus {
-            InputFocus::Content => InputFocus::StartDate,
+            InputFocus::Title => InputFocus::Description,
+            InputFocus::Description => InputFocus::StartDate,
             InputFocus::StartDate => InputFocus::EndDate,
-            InputFocus::EndDate => InputFocus::Content,
+            InputFocus::EndDate => InputFocus::Title,
             InputFocus::JiraDomain => InputFocus::JiraEmail,
             InputFocus::JiraEmail => InputFocus::JiraToken,
             InputFocus::JiraToken => InputFocus::JiraProjects,

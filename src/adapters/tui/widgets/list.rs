@@ -1,116 +1,74 @@
 use crate::adapters::tui::app::App;
 use crate::adapters::tui::widgets::colors::Colors;
-use chrono::Local;
+use crate::adapters::tui::widgets::item_card::draw_card_item;
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem},
+    style::Style,
+    widgets::{Block, Borders},
     Frame,
 };
 
 pub fn draw_task_list(f: &mut Frame, app: &mut App, area: Rect, colors: &Colors) {
-    let items: Vec<ListItem> = app
-        .get_filtered_items()
-        .iter()
-        .map(|item| {
-            let status_icon = if item.completed { "⬢" } else { "⬡" };
-            let important_marker = if item.important { "!" } else { " " };
-            let mut text_style = Style::default().fg(colors.primary_text);
-            let mut icon_style = Style::default().fg(colors.accent);
+    let mut items = app.get_filtered_items();
 
-            if item.completed {
-                text_style = text_style.fg(colors.dim_text).add_modifier(Modifier::DIM);
-                icon_style = icon_style.fg(colors.dim_text);
-            }
+    let block = Block::default()
+        .borders(Borders::LEFT)
+        .border_style(Style::default().fg(colors.dim_text))
+        .title(" Tasks ")
+        .title_style(Style::default().fg(colors.dim_text));
 
-            let short_id = if item.id.len() > 4 {
-                &item.id[..4]
-            } else {
-                &item.id
-            }
-            .to_uppercase();
+    let list_area = block.inner(area);
+    f.render_widget(block, area);
 
-            let date_str = match (item.start_date, item.end_date) {
-                (Some(s), Some(e)) => format!(
-                    " ({: >10} -> {: >10})",
-                    s.format("%Y-%m-%d"),
-                    e.format("%Y-%m-%d")
-                ),
-                //TODO: Check if this can be cached so it does not get checked every frame
-                (Some(s), None) => {
-                    let naive_start_date = s.with_timezone(&Local).date_naive();
-                    let today = Local::now().date_naive();
-                    let days_since = if today > naive_start_date {
-                        (today - naive_start_date).num_days()
-                    } else {
-                        0
-                    };
+    if items.is_empty() {
+        return;
+    }
 
-                    format!(
-                        " (Started: {: >10}, {} days ago)",
-                        s.format("%Y-%m-%d"),
-                        days_since
-                    )
-                }
-                (None, Some(e)) => {
-                    let naive_end = e.with_timezone(&Local).date_naive();
-                    let today = Local::now().date_naive();
-                    let days_until = if naive_end > today {
-                        (naive_end - today).num_days()
-                    } else {
-                        0
-                    };
+    let item_height = 4;
+    let visible_count = (list_area.height / item_height) as usize;
 
-                    format!(
-                        " (End: {: >10}, in {} days)",
-                        e.format("%Y-%m-%d"),
-                        days_until
-                    )
-                }
-                (None, None) => "".to_string(),
-            };
-
-            let content = Line::from(vec![
-                Span::styled(
-                    format!("{:<4} ", short_id),
-                    Style::default().fg(colors.dim_text),
-                ),
-                Span::styled(format!("{} ", status_icon), icon_style),
-                Span::styled(
-                    format!("{} ", important_marker),
-                    if item.important {
-                        Style::default().fg(colors.alert)
-                    } else {
-                        Style::default().fg(colors.bg)
-                    },
-                ),
-                Span::styled(format!("{}", item.content), text_style),
-                Span::styled(
-                    date_str,
-                    Style::default()
-                        .fg(colors.dim_text)
-                        .add_modifier(Modifier::ITALIC),
-                ),
-            ]);
-            ListItem::new(content)
+    // TODO: Make the ordering scalable
+    items.sort_by(|a, b| {
+        match (&a.start_date, &b.start_date) {
+            (Some(da), Some(db)) => da.cmp(db),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+        .then_with(|| match (&a.end_date, &b.end_date) {
+            (Some(da), Some(db)) => da.cmp(db),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
         })
-        .collect();
+        .then_with(|| a.title.cmp(&b.title))
+        .then_with(|| a.id.cmp(&b.id))
+    });
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::LEFT)
-                .border_style(Style::default().fg(colors.dim_text))
-                .title(" Tasks ")
-                .title_style(Style::default().fg(colors.dim_text)),
-        )
-        .highlight_style(
-            Style::default()
-                .bg(colors.card_bg)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("→ ");
+    let selected = app.list_state.selected().unwrap_or(0);
 
-    f.render_stateful_widget(list, area, &mut app.list_state);
+    // Simple scrolling logic
+    let mut offset = app.list_offset;
+    if selected >= offset + visible_count {
+        offset = selected.saturating_sub(visible_count).saturating_add(1);
+    } else if selected < offset {
+        offset = selected;
+    }
+    app.list_offset = offset;
+
+    for i in 0..visible_count {
+        let item_idx = offset + i;
+        if item_idx >= items.len() {
+            break;
+        }
+
+        let item_area = Rect {
+            x: list_area.x,
+            y: list_area.y + (i as u16 * item_height),
+            width: list_area.width,
+            height: item_height,
+        };
+
+        draw_card_item(f, &items[item_idx], item_area, colors, item_idx == selected);
+    }
 }
