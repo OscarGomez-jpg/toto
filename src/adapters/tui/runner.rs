@@ -1,6 +1,9 @@
 use crate::adapters::tui::app::{Action, App, CurrentScreen, InputFocus};
 use crate::adapters::tui::config::Config;
 use crate::adapters::tui::ui::ui;
+use crate::domain::command::{
+    AddTaskCommand, ClearCompletedCommand, SyncJiraCommand, UpdateTaskCommand,
+};
 use crate::ports::inbound::TaskServicePort;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
@@ -16,7 +19,6 @@ use std::io;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-//TODO: Implement the command pattern for the behavior
 pub fn run_tui(task_service: Arc<dyn TaskServicePort>) -> io::Result<()> {
     info!("Initializing TUI...");
     enable_raw_mode()?;
@@ -156,14 +158,18 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
                 app.input_focus = InputFocus::JiraDomain;
             } else {
                 info!("Initiating Jira synchronization");
-                if let Err(e) = app.task_service.sync_jira(config.jira.clone()) {
+                let cmd = Box::new(SyncJiraCommand {
+                    config: config.jira.clone(),
+                });
+                if let Err(e) = app.task_service.execute_command(cmd) {
                     error!("Jira sync failed: {:?}", e);
                 }
             }
         }
         Action::ClearCompleted => {
             info!("Clearing completed tasks.");
-            let _ = app.task_service.clear_completed_tasks();
+            let cmd = Box::new(ClearCompletedCommand);
+            let _ = app.task_service.execute_command(cmd);
         }
         Action::Esc => match app.current_screen {
             CurrentScreen::Main => app.search_query.clear(),
@@ -203,7 +209,10 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
 
                 if let Ok(_) = new_config.save() {
                     info!("Jira configuration saved successfully");
-                    if let Err(e) = app.task_service.sync_jira(new_config.jira.clone()) {
+                    let cmd = Box::new(SyncJiraCommand {
+                        config: new_config.jira.clone(),
+                    });
+                    if let Err(e) = app.task_service.execute_command(cmd) {
                         error!("Jira sync failed after save: {:?}", e);
                     }
                     app.current_screen = CurrentScreen::Main;
@@ -216,12 +225,13 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
                     info!("Adding new task: {}", app.title_input);
                     let start = app.parse_start_date();
                     let end = app.parse_end_date();
-                    if let Err(e) = app.task_service.add_task(
-                        app.title_input.clone(),
-                        app.description_input.clone(),
-                        start,
-                        end,
-                    ) {
+                    let cmd = Box::new(AddTaskCommand {
+                        title: app.title_input.clone(),
+                        description: app.description_input.clone(),
+                        start_date: start,
+                        end_date: end,
+                    });
+                    if let Err(e) = app.task_service.execute_command(cmd) {
                         error!("Failed to add task: {:?}", e);
                     }
                     app.current_screen = CurrentScreen::Main;
@@ -237,13 +247,14 @@ fn handle_action(app: &mut App, action: Action, config: &Config) -> io::Result<b
                     info!("Updating task: {}", id);
                     let start = app.parse_start_date();
                     let end = app.parse_end_date();
-                    if let Err(e) = app.task_service.update_task(
-                        id.clone(),
-                        app.title_input.clone(),
-                        app.description_input.clone(),
-                        start,
-                        end,
-                    ) {
+                    let cmd = Box::new(UpdateTaskCommand {
+                        id: id.clone(),
+                        title: app.title_input.clone(),
+                        description: app.description_input.clone(),
+                        start_date: start,
+                        end_date: end,
+                    });
+                    if let Err(e) = app.task_service.execute_command(cmd) {
                         error!("Failed to update task: {:?}", e);
                     }
                     app.current_screen = CurrentScreen::Main;

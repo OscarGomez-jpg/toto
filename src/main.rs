@@ -9,6 +9,7 @@ use toto::adapters::storage::sqlite::SqliteRepository;
 use toto::adapters::tui::runner::run_tui;
 use toto::domain::service::TaskService;
 use toto::ports::inbound::TaskServicePort;
+use toto::domain::command::{AddTaskCommand, RemoveTaskCommand, ToggleCompletedCommand, ToggleImportantCommand, UpdateTaskCommand, ClearCompletedCommand};
 
 fn init_logger() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(proj_dirs) = ProjectDirs::from("", "", "toto") {
@@ -83,25 +84,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .get_one::<String>("desc")
             .cloned()
             .unwrap_or_default();
-        task_service.add_task(title.to_owned(), description, start_date, end_date)?;
+        let cmd = Box::new(AddTaskCommand {
+            title: title.to_owned(),
+            description,
+            start_date,
+            end_date,
+        });
+        task_service.execute_command(cmd)?;
         println!("Added: {}", title);
         performed_action = true;
     }
 
     if let Some(id_str) = matches.get_one::<String>("remove") {
-        let msg = task_service.remove_task(id_str.to_owned())?;
-        println!("{}", msg);
+        let cmd = Box::new(RemoveTaskCommand { id: id_str.to_owned() });
+        let res = task_service.execute_command(cmd)?;
+        if let toto::domain::command::CommandResult::Id(msg) = res {
+            println!("{}", msg);
+        }
         performed_action = true;
     }
 
     if let Some(id_str) = matches.get_one::<String>("done") {
-        task_service.toggle_completed(id_str.to_owned())?;
+        let cmd = Box::new(ToggleCompletedCommand { id: id_str.to_owned() });
+        task_service.execute_command(cmd)?;
         println!("Toggled completion for task {}", id_str);
         performed_action = true;
     }
 
     if let Some(id_str) = matches.get_one::<String>("important") {
-        task_service.toggle_important(id_str.to_owned())?;
+        let cmd = Box::new(ToggleImportantCommand { id: id_str.to_owned() });
+        task_service.execute_command(cmd)?;
         println!("Toggled importance for task {}", id_str);
         performed_action = true;
     }
@@ -112,13 +124,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .get_one::<String>("desc")
                 .cloned()
                 .unwrap_or_default();
-            task_service.update_task(
-                id_str.trim().to_string(),
-                title.trim().to_string(),
+            let cmd = Box::new(UpdateTaskCommand {
+                id: id_str.trim().to_string(),
+                title: title.trim().to_string(),
                 description,
                 start_date,
                 end_date,
-            )?;
+            });
+            task_service.execute_command(cmd)?;
             println!("Updated task {} title", id_str);
             performed_action = true;
         } else {
@@ -128,8 +141,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if matches.get_flag("clear") {
-        let msg = task_service.clear_completed_tasks()?;
-        println!("{}", msg);
+        let cmd = Box::new(ClearCompletedCommand);
+        let res = task_service.execute_command(cmd)?;
+        if let toto::domain::command::CommandResult::Id(msg) = res {
+            println!("{}", msg);
+        }
         performed_action = true;
     }
 

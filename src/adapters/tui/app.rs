@@ -1,3 +1,6 @@
+use crate::domain::command::{
+    MoveTaskCommand, RemoveTaskCommand, ToggleCompletedCommand, ToggleImportantCommand,
+};
 use crate::domain::task::Task;
 use crate::ports::inbound::TaskServicePort;
 use chrono::{DateTime, Datelike, Utc};
@@ -235,7 +238,8 @@ impl App {
         if let Some(i) = self.list_state.selected() {
             if i > 0 && i < items.len() {
                 let id = items[i].id.clone();
-                let _ = self.task_service.move_task(id, 1); // 1 is up in our position DESC order
+                let cmd = Box::new(MoveTaskCommand { id, delta: 1 });
+                let _ = self.task_service.execute_command(cmd);
                 self.list_state.select(Some(i - 1));
             }
         }
@@ -246,7 +250,8 @@ impl App {
         if let Some(i) = self.list_state.selected() {
             if i < items.len() - 1 {
                 let id = items[i].id.clone();
-                let _ = self.task_service.move_task(id, -1); // -1 is down in our position DESC order
+                let cmd = Box::new(MoveTaskCommand { id, delta: -1 });
+                let _ = self.task_service.execute_command(cmd);
                 self.list_state.select(Some(i + 1));
             }
         }
@@ -257,7 +262,8 @@ impl App {
         if let Some(i) = self.list_state.selected() {
             if i < items.len() {
                 let id = items[i].id.clone();
-                let _ = self.task_service.remove_task(id);
+                let cmd = Box::new(RemoveTaskCommand { id });
+                let _ = self.task_service.execute_command(cmd);
 
                 let new_items = self.get_filtered_items();
                 if new_items.is_empty() {
@@ -273,7 +279,10 @@ impl App {
         let items = self.get_filtered_items();
         if let Some(i) = self.list_state.selected() {
             if i < items.len() {
-                let _ = self.task_service.toggle_completed(items[i].id.clone());
+                let cmd = Box::new(ToggleCompletedCommand {
+                    id: items[i].id.clone(),
+                });
+                let _ = self.task_service.execute_command(cmd);
             }
         }
     }
@@ -282,7 +291,10 @@ impl App {
         let items = self.get_filtered_items();
         if let Some(i) = self.list_state.selected() {
             if i < items.len() {
-                let _ = self.task_service.toggle_important(items[i].id.clone());
+                let cmd = Box::new(ToggleImportantCommand {
+                    id: items[i].id.clone(),
+                });
+                let _ = self.task_service.execute_command(cmd);
             }
         }
     }
